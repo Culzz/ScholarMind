@@ -83,8 +83,14 @@ ELIGIBILITY_HINTS = (
     "must be between",
     "must hold",
     "must have",
+    "must not",
+    "must be",
+    "required to",
+    "need to meet",
+    "needs to meet",
     "are eligible",
     "is eligible",
+    "eligible if",
     "open to",
     "citizens of",
     "nationals of",
@@ -93,6 +99,31 @@ ELIGIBILITY_HINTS = (
     "score of",
     "requirements:",
     "criteria:",
+)
+
+# "at least two years of work experience" and its many variants.
+WORK_EXPERIENCE_RE = re.compile(
+    r"(?:at\s+least|minimum\s+of|no\s+less\s+than)\s+(\d{1,2})\s*(?:\(\d+\))?\s*"
+    r"year[s]?\s+(?:of\s+)?(?:full[-\s]time\s+|relevant\s+|professional\s+|work\s+|hands[-\s]on\s+)*experience",
+    re.IGNORECASE,
+)
+
+# "you must have lived in your country of residence for at least one year"
+RESIDENCY_YEARS_RE = re.compile(
+    r"(?:have\s+lived|reside|living|residing)\s+in\s+[^.]{0,60}?for\s+at\s+least\s+(\d{1,2})\s*year",
+    re.IGNORECASE,
+)
+
+# "proof of X", "a certificate of X", "transcript of X"
+PROOF_RE = re.compile(
+    r"(?:proof|certificate|transcript|certification)\s+of\s+([a-z][a-z\s\-]{3,45})",
+    re.IGNORECASE,
+)
+
+MINIMUM_ENGLISH_RE = re.compile(
+    r"(?:minimum|at\s+least|no\s+less\s+than)\s+(?:score\s+of\s+|band\s+of\s+|grade\s+of\s+)?"
+    r"(\d{1,2}(?:\.\d)?)\s*(?:in|for|,)?\s*(IELTS|TOEFL)",
+    re.IGNORECASE,
 )
 
 NATIONALITY_RE = re.compile(
@@ -348,6 +379,15 @@ def extract_documents(text: str) -> list[DocumentFact]:
         mandatory = not any(phrase in lowered for phrase in ("if applicable", "optional", "where applicable"))
         if doc_type in documents:
             continue
+
+        proof = PROOF_RE.search(sentence)
+        if proof and not doc_type:
+            from scholarmind.normalization.fields import normalise_document_type as _normalise
+
+            doc_type = _normalise(proof.group(1))
+            if not doc_type:
+                continue
+
         documents[doc_type] = DocumentFact(
             doc_type=doc_type,
             mandatory=mandatory,
@@ -479,15 +519,52 @@ def extract_eligibility(text: str) -> list[EligibilityFact]:
                 )
 
         english_score = ENGLISH_SCORE_RE.search(sentence)
+        minimum_english = MINIMUM_ENGLISH_RE.search(sentence)
         if english_score:
             test = english_score.group(1).upper()
             score = float(english_score.group(2))
+        elif minimum_english:
+            score = float(minimum_english.group(1))
+            test = minimum_english.group(2).upper()
+        if english_score or minimum_english:
             rules.append(
                 EligibilityFact(
                     kind="language",
                     subject="ielts" if test == "IELTS" else "toefl",
                     operator="gte",
                     value=score,
+                    rule_text=sentence.strip(),
+                    span_start=start,
+                    span_end=end,
+                    confidence=0.7,
+                )
+            )
+
+        experience = WORK_EXPERIENCE_RE.search(sentence)
+        if experience:
+            months = int(experience.group(1)) * 12
+            rules.append(
+                EligibilityFact(
+                    kind="work_experience",
+                    subject="work_experience_months",
+                    operator="gte",
+                    value=months,
+                    rule_text=sentence.strip(),
+                    span_start=start,
+                    span_end=end,
+                    confidence=0.75,
+                )
+            )
+
+        residency = RESIDENCY_YEARS_RE.search(sentence)
+        if residency:
+            months = int(residency.group(1)) * 12
+            rules.append(
+                EligibilityFact(
+                    kind="residency",
+                    subject="residency_months",
+                    operator="gte",
+                    value=months,
                     rule_text=sentence.strip(),
                     span_start=start,
                     span_end=end,

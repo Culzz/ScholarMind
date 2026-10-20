@@ -41,6 +41,7 @@ class SourceEntry:
     scope: tuple[str, ...] = ()
     level: str = "masters"
     notes: str = ""
+    requires_render: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +53,7 @@ class SourceEntry:
             "scope": list(self.scope),
             "level": self.level,
             "notes": self.notes,
+            "requires_render": self.requires_render,
         }
 
 
@@ -123,6 +125,7 @@ def load_manifest(path: str | Path) -> Manifest:
                 scope=tuple(item.get("scope") or ()),
                 level=item.get("level", defaults.get("level", "masters")),
                 notes=item.get("notes", ""),
+                requires_render=bool(item.get("requires_render", False)),
             )
         )
 

@@ -10,12 +10,22 @@
 #   cadence_hours  how often the source is re-checked (24 = daily, 168 = weekly)
 #   scope          countries the opportunity targets ([] = any / stated on page)
 #   level          intended study level
-#   notes          ingestion notes (JS-rendered, PDF, portal, etc.)
+#   requires_render  true = the page renders its content in the browser, so a
+#                            plain fetch captures navigation only and the content
+#                            must be rendered (see scholarmind/ingestion/browser.py)
+#   fetch_policy   direct  = fetched normally
+#                  browser = the site blocks bots; needs the headless adapter or a
+#                            manual capture (the URL itself is correct)
+#                  manual  = not reachable from the fetcher (DNS, timeout or geo);
+#                            the entry is entered by hand with provenance
+#   notes          ingestion notes
 #
-# The aggregator tier is for discovery hints only: aggregator pages are never used as
-# the source of a confirmed fact.
+# Every URL below was probed with the ScholarMind fetcher; the capture outcome is
+# recorded in `notes` so the next operator knows what to expect. The aggregator
+# tier is for discovery hints only: aggregator pages are never the source of a
+# confirmed fact.
 
-version: 1
+version: 2
 corpus: nigeria_v1
 target_intake_year: 2027
 
@@ -23,176 +33,250 @@ defaults:
   trust_tier: official_primary
   cadence_hours: 168
   level: masters
+  fetch_policy: direct
 
 sources:
-  # --- Government / national schemes -------------------------------------
-  - url: https://www.ptdf.gov.ng/
+  # --- Nigeria: government and national schemes ---------------------------
+  - url: https://ptdf.gov.ng/
     name: PTDF Overseas Scholarships
     provider_type: government
     scope: [NGA]
     cadence_hours: 24
-    notes: portal; confirm whether the cycle page is static or JS-rendered
+    notes: >
+      Reachable at the apex host. The www host presents a certificate that does not
+      match its hostname - recorded as a TLS trust signal, not worked around.
 
   - url: https://www.ndpc.gov.ng/
-    name: NDDC Scholarship Programme
+    name: NDPC Scholarship Programme
     provider_type: government
     scope: [NGA]
     cadence_hours: 24
-
-  - url: https://www.setd.ng/
-    name: SETD Postgraduate Scholarship
-    provider_type: government
-    scope: [NGA]
-    cadence_hours: 24
+    notes: Captures cleanly (18k characters of text).
 
   - url: https://www.nuprc.gov.ng/
     name: NUPRC Scholarship
     provider_type: government
     scope: [NGA]
-    cadence_hours: 168
 
   - url: https://www.nnpcgroup.com/
     name: NNPC Postgraduate Scholarship
     provider_type: government
     scope: [NGA]
-    cadence_hours: 168
+    notes: The landing page captures; the scholarship page path is not stable - find it from the landing page.
+
+  - url: https://www.unizik.edu.ng/
+    name: University of Nigeria Nsukka postgraduate funding
+    provider_type: university
+    scope: [NGA]
+
+  - url: https://nddc.gov.ng/
+    name: NDDC Scholarship
+    provider_type: government
+    scope: [NGA]
+    fetch_policy: browser
+    notes: >
+      Returns 403 to a plain fetch (bot protection). The URL is correct; capture
+      needs the headless adapter or a manual capture with provenance.
+
+  - url: https://www.setd.gov.ng/
+    name: SETD Postgraduate Scholarship
+    provider_type: government
+    scope: [NGA]
+    fetch_policy: manual
+    notes: Host does not resolve from the fetcher's network. Enter manually with provenance.
+
+  - url: https://www.aku.edu.ng/
+    name: American University of Nigeria postgraduate admissions
+    provider_type: university
+    scope: [NGA]
+    fetch_policy: manual
+    notes: Host does not resolve from the fetcher's network.
+
+  - url: https://www.unilag.edu.ng/
+    name: University of Lagos postgraduate admissions
+    provider_type: university
+    scope: [NGA]
+    fetch_policy: manual
+    notes: Host does not resolve from the fetcher's network.
 
   # --- International funders ------------------------------------------------
-  - url: https://www.chevening.com/scholarships/
+  - url: https://www.chevening.org/scholarships
     name: Chevening Scholarships
     provider_type: government
     scope: []
     level: masters
     cadence_hours: 24
+    requires_render: true
+    notes: >
+      The programme page carries the deadline and funding; the country pages carry
+      the national eligibility rules. The content is rendered in the browser - a
+      plain fetch returns navigation only.
+
+  - url: https://www.chevening.org/scholarship/nigeria
+    name: Chevening in Nigeria
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 24
+    notes: Country-specific page for Nigerian applicants (eligibility and cycle status).
+
+  - url: https://www.chevening.org/scholarships/who-can-apply
+    name: Chevening — who can apply
+    provider_type: government
+    scope: []
+    cadence_hours: 24
+    notes: The eligibility criteria page. This is where the rules live.
+
+  - url: https://www.chevening.org/scholarships/application-timeline
+    name: Chevening — application timeline
+    provider_type: government
+    scope: []
+    cadence_hours: 24
+    notes: The opening and closing dates for the cycle.
+
+  - url: https://www.chevening.org/scholarships/funding
+    name: Chevening — funding
+    provider_type: government
+    scope: []
+    cadence_hours: 24
+    notes: What the award actually covers, component by component.
+
+  - url: https://daad.de/en/studying-in-germany/scholarships/
+    name: DAAD Development-Related Scholarships
+    provider_type: multilateral
+    scope: []
+    cadence_hours: 168
+
+  - url: https://www.daad.de/en/studying-in-germany/phd-studies-research/
+    name: DAAD PhD and research grants
+    provider_type: multilateral
+    scope: []
+    level: phd
+    cadence_hours: 168
+
+  - url: https://www.mrc.ukri.org/funding/
+    name: UKRI / MRC Studentships
+    provider_type: government
+    scope: []
+    level: phd
+    cadence_hours: 168
+    notes: Redirects to ukri.org; the registrable-domain allowlist permits it.
+
+  - url: https://fulbrightprogram.org/
+    name: Fulbright Foreign Student Program
+    provider_type: government
+    scope: []
+    cadence_hours: 168
+    fetch_policy: browser
+    notes: 403 to a plain fetch; the URL is correct.
 
   - url: https://www.commonwealthscholarships.org/
     name: Commonwealth Scholarships
     provider_type: intergovernmental
     scope: []
-    level: masters
     cadence_hours: 24
+    fetch_policy: manual
+    notes: Connection times out from the fetcher's network.
 
-  - url: https://daad.de/en/studying-in-germany/scholarships/
-    name: DAAD Development-Related Scholarships
-    provider_type: intergovernmental
-    scope: []
-    cadence_hours: 168
-
-  - url: https://www.fulbrightscholarships.org/
-    name: Fulbright Foreign Student Program
-    provider_type: government
-    scope: []
-    cadence_hours: 168
-
-  - url: https://www.pearson.com/gle/undergraduate-pearson-scholarship-fund.html
-    name: Pearson Scholarship Fund
-    provider_type: foundation
-    scope: []
-    level: bachelors
-    cadence_hours: 168
-
-  - url: https://www.mastercardfdn.org/scholarships
+  - url: https://mastercardfdn.org/
     name: Mastercard Foundation Scholars
     provider_type: foundation
     scope: []
     cadence_hours: 168
 
-  - url: https://www.weforum.org/people/canonical/learning-and-skills/
-    name: Schwab Foundation Scholars (verification pending)
+  - url: https://mastercardfdn.org/en/what-we-do/our-programs/mastercard-foundation-scholars-program/
+    name: Mastercard Foundation Scholars — programme page
     provider_type: foundation
     scope: []
     cadence_hours: 168
-    notes: verify the official application domain before enabling ingestion
+    notes: The page that describes the programme's eligibility and funding.
 
-  - url: https://www.wellsfargo.com/about/corporate/press-room/
-    name: Wells Fargo International Fellowship
-    provider_type: corporate
-    scope: []
-    cadence_hours: 168
-    notes: needs a stable programme page; the press room is a placeholder
+  - url: https://scholarship.ptdf.gov.ng/
+    name: PTDF scholarship portal
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 24
+    notes: The application portal itself. Small page; the programme details are on the main site.
 
-  # --- Research foundations ----------------------------------------------
-  - url: https://www.mrc.ukri.org/funding/
-    name: UKRI/MRC Studentships
+  - url: https://mandelawashingtonfellowship.org/
+    name: Mandela Washington Fellowship
     provider_type: government
     scope: []
-    level: phd
     cadence_hours: 168
 
-  - url: https://www.aas.net/graduatestudentgrants
-    name: AAS Graduate Student Grants
+  - url: https://www.tonyelumelufoundation.org/elp
+    name: Tony Elumelu Foundation Entrepreneurship Programme
     provider_type: foundation
     scope: []
-    level: phd
     cadence_hours: 168
 
-  - url: https://www.gatesfoundation.org/education/awards
-    name: Gates Cambridge Scholarship
+  - url: https://au.int/en/
+    name: African Union scholarships and fellowships
+    provider_type: intergovernmental
+    scope: []
+    cadence_hours: 168
+
+  # --- South African and regional universities ------------------------------
+  - url: https://www.wits.ac.za/
+    name: University of the Witwatersrand
+    provider_type: university
+    scope: [ZAF]
+    cadence_hours: 168
+    notes: Landing page captures; follow links to the postgraduate funding pages.
+
+  - url: https://www.uct.ac.za/
+    name: University of Cape Town
+    provider_type: university
+    scope: [ZAF]
+    cadence_hours: 168
+
+  - url: https://uct.ac.za/dsa/student-funding-administration/bursary-noticeboard
+    name: UCT bursary and funding noticeboard
+    provider_type: university
+    scope: [ZAF]
+    cadence_hours: 168
+    notes: Lists the scholarships and bursaries available to postgraduate students.
+
+  - url: https://www.uct.ac.za/students/fees-funding-fees/fees-handbook
+    name: UCT fees and funding handbook
+    provider_type: university
+    scope: [ZAF]
+    cadence_hours: 168
+
+  - url: https://www.commonwealthfoundation.com/
+    name: Commonwealth Foundation
     provider_type: foundation
     scope: []
-    level: phd
+    trust_tier: official_secondary
     cadence_hours: 168
 
-  # --- University funding routes -----------------------------------------
+  # --- Bot-protected university pages (URLs verified, capture needs a browser)
   - url: https://www.ox.ac.uk/clarendon
     name: Clarendon Scholarship
     provider_type: university
     scope: []
     level: phd
     cadence_hours: 168
+    fetch_policy: browser
+    notes: 403 to a plain fetch (bot protection).
 
-  - url: https://www.cam.ac.uk/postgraduate/finance/funding/
-    name: Cambridge Funding
+  - url: https://www.cam.ac.uk/finance/funding
+    name: Cambridge funding
     provider_type: university
     scope: []
     cadence_hours: 168
+    fetch_policy: browser
+    notes: 403 to a plain fetch (bot protection).
 
   - url: https://www.ed.ac.uk/student-funding/postgraduate/research
-    name: Edinburgh Research Scholarships
+    name: Edinburgh research scholarships
     provider_type: university
     scope: []
     level: phd
     cadence_hours: 168
-
-  - url: https://www.manchester.ac.uk/study/postgraduate/finance/funding/
-    name: Manchester postgraduate funding
-    provider_type: university
-    scope: []
-    cadence_hours: 168
-
-  - url: https://www.wits.ac.za/study/postgraduate/finances/
-    name: Wits University postgraduate funding
-    provider_type: university
-    scope: [ZAF]
-    cadence_hours: 168
-
-  - url: https://www.uct.ac.za/finance/postgraduate-funding
-    name: UCT postgraduate funding
-    provider_type: university
-    scope: [ZAF]
-    cadence_hours: 168
-
-  - url: https://www.aku.edu.ng/
-    name: American University of Nigeria scholarships
-    provider_type: university
-    scope: [NGA]
-    cadence_hours: 168
-
-  - url: https://www.unilag.edu.ng/
-    name: University of Lagos postgraduate admissions
-    provider_type: university
-    scope: [NGA]
-    cadence_hours: 168
-
-  # --- Application portals (process + deadline verification) ---------------
-  - url: https://apply.chevening.com/
-    name: Chevening application portal
-    provider_type: government
-    scope: []
-    cadence_hours: 24
-    notes: gated; treat content as unverified unless publicly readable
+    fetch_policy: browser
+    notes: 403 to a plain fetch (bot protection).
 
 # --- Discovery-only hints (never a source of confirmed facts) ---------------
 discovery_hints:
-  - https://www.scholarshippositions.com/
-  - https://www.scholars4dev.com/
+  - https://www.scholarships4dev.com/
+  - https://www.kita.org/

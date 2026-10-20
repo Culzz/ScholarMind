@@ -58,9 +58,11 @@ class SafetyPolicy:
             return False
         if not self.allowed_hosts:
             return True
-        return host in self.allowed_hosts or any(
-            host.endswith("." + allowed) for allowed in self.allowed_hosts
-        )
+        if host in self.allowed_hosts:
+            return True
+        if registrable_domain(host) in self.allowed_hosts:
+            return True
+        return any(host.endswith("." + allowed) for allowed in self.allowed_hosts)
 
 
 def _ip_is_public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -124,13 +126,52 @@ def validate_redirect(location: str, policy: SafetyPolicy) -> str:
     return location
 
 
+# Public suffixes that carry a third level (so "ndpc.gov.ng" is registrable,
+# but "gov.ng" is not). A naive "last two labels" rule would treat every
+# government domain in the manifest as the same site.
+MULTI_LABEL_SUFFIXES = {
+    "gov.ng", "org.ng", "edu.ng", "mil.ng", "com.ng", "net.ng", "sch.ng",
+    "gov.uk", "ac.uk", "org.uk", "co.uk", "me.uk", "net.uk", "nhs.uk",
+    "co.za", "org.za", "ac.za", "gov.za", "net.za",
+    "com.au", "org.au", "edu.au", "gov.au", "net.au",
+    "co.ke", "or.ke", "ac.ke", "go.ke",
+    "com.gh", "org.gh", "edu.gh", "gov.gh",
+    "co.tz", "ac.tz", "go.tz",
+}
+
+
+def registrable_domain(host: str) -> str:
+    """The registrable domain of a host.
+
+    ``www.ndpc.gov.ng`` and ``ndpc.gov.ng`` are the same site; an allowlist
+    that treats them as different hosts breaks on a perfectly ordinary
+    ``www`` -> apex redirect. Public suffixes with a third level (such as
+    ``gov.ng``) are handled explicitly, so unrelated government sites are not
+    collapsed into one another.
+    """
+    host = host.lower().strip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    parts = host.split(".")
+    if len(parts) <= 2:
+        return host
+    if ".".join(parts[-2:]) in MULTI_LABEL_SUFFIXES and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
 def build_policy(allowed_urls: list[str], **overrides) -> SafetyPolicy:
-    """Build a policy whose allowlist is the set of hosts in the manifest."""
+    """Build a policy whose allowlist is the set of hosts in the manifest.
+
+    Allow-listing works on the registrable domain, so a redirect from
+    ``www.example.org`` to ``example.org`` (or to another subdomain of it) is
+    permitted, while an unrelated host is still refused.
+    """
     hosts = set()
     for url in allowed_urls:
         host = urlparse(url).hostname
         if host:
-            hosts.add(host.lower())
+            hosts.add(registrable_domain(host))
     return SafetyPolicy(allowed_hosts=frozenset(hosts), **overrides)
 
 

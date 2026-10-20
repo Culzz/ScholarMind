@@ -32,6 +32,9 @@ FORBIDDEN_EXCEPTIONS: dict[str, set[str]] = {
     # The evaluation harness may report cost/latency; it still may not import a
     # web framework or a database session.
     "evaluation": {"sqlalchemy", "fastapi"},
+    # Ingestion is the boundary layer: fetching is its job, so an HTTP client
+    # is permitted there (and only there).
+    "ingestion": {"httpx"},
 }
 
 

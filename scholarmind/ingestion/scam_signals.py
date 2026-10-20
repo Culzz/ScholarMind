@@ -146,6 +146,38 @@ def detect_gated_portal(url: str, text: str) -> list[ScamSignal]:
     ]
 
 
+def detect_tls_anomaly(error: str | None) -> list[ScamSignal]:
+    """Flag a TLS or certificate problem with a source.
+
+    Certificate problems are never worked around: the fetch fails, and the
+    source is marked with a signal so a reviewer can decide what to do.
+    """
+    if not error:
+        return []
+    lowered = error.lower()
+    if "certificate" not in lowered and "ssl" not in lowered and "tls" not in lowered:
+        return []
+    if "hostname mismatch" in lowered:
+        return [
+            ScamSignal(
+                signal_type="tls_anomaly",
+                severity="high",
+                detail=(
+                    "The site's certificate does not match its hostname. That can happen "
+                    "after a domain change, but it can also indicate a look-alike site. "
+                    "Verify the address before using it."
+                ),
+            )
+        ]
+    return [
+        ScamSignal(
+            signal_type="tls_anomaly",
+            severity="medium",
+            detail=f"TLS problem while fetching this source: {error[:160]}",
+        )
+    ]
+
+
 def collect_signals(
     *,
     url: str,
