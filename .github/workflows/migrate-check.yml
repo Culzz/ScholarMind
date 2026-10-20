@@ -1,0 +1,77 @@
+name: Migration check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reversibility:
+    name: alembic up/down/up
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          # Throwaway credentials for the CI service container; they are not
+          # secrets and are not reused anywhere.
+          POSTGRES_USER: scholarmind
+          POSTGRES_PASSWORD: scholarmind
+          POSTGRES_DB: scholarmind
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U scholarmind -d scholarmind"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+    env:
+      DATABASE_URL: postgresql+psycopg://scholarmind:scholarmind@localhost:5432/scholarmind
+      PYTHONPATH: services/api:.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: services/api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r services/api/requirements.txt
+
+      - name: Upgrade to head
+        run: alembic upgrade head
+
+      - name: Record the head revision
+        run: alembic current
+
+      - name: Downgrade one revision
+        run: alembic downgrade -1
+
+      - name: Upgrade back to head
+        run: alembic upgrade head
+
+      - name: Verify the head revision is restored
+        run: |
+          current="$(alembic current 2>/dev/null | tail -n 1 | cut -d' ' -f1)"
+          head="$(alembic heads 2>/dev/null | tail -n 1 | cut -d' ' -f1)"
+          echo "current: ${current}"
+          echo "head:    ${head}"
+          if [ -z "${current}" ] || [ "${current}" != "${head}" ]; then
+            echo "the migration chain is not reversible: current != head" >&2
+            exit 1
+          fi

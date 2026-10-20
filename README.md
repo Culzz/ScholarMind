@@ -78,8 +78,22 @@ See `docs/EVALUATION.md` for the full protocol.
 
 ## Status
 
-Blueprint written (`PLAN.md`). Implementation begins at Phase 01 (source audit + schema + evaluation
-protocol). Metrics in `docs/MODEL_CARD.md` are placeholders until measured.
+Phases 01–05 of the build plan are implemented, with the catalogue, planner and
+intelligence layers in place:
+
+| Area | What exists today |
+|---|---|
+| Schema | 37 tables across three Alembic migrations (core, platform, Part II) with pgvector, `tsvector` GIN and HNSW indexes |
+| API | 22 endpoints: catalogue, eligibility, unlock paths, smart questions, assistant, compare, recommendations, planner + exports, change feed, admin console, health |
+| Core | Framework-free domain package: ingestion, extraction, normalization, eligibility, retrieval, generation + verification, freshness, planning, readiness, vault, reporting |
+| Worker | Celery app with hourly refresh, staleness sweep, alert dispatch, retry schedule and idempotent tasks |
+| Frontend | React + TS + Vite + Tailwind app with claim-state language, discovery, detail, eligibility, compare, planner, assistant, dashboard |
+| Evaluation | Offline harness, 202 passing tests including property-based invariants, ScholarBench-Africa bench (98 items), adversarial suite, redaction and publish tooling, CI regression gate |
+| Research | Evaluation protocol, data dictionary, system card with placeholder metrics (no number is published until measured) |
+
+**Not yet done:** live corpus capture (the corpus is still empty — the manifest and pipeline exist, the sources have not been ingested), the extraction worker stage, the auth/registration flow, and the measured evaluation results.
+
+Metrics in `docs/MODEL_CARD.md` remain placeholders until the evaluation runs produce them.
 
 ## Documentation
 

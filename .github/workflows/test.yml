@@ -1,0 +1,60 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          # Throwaway credentials for the CI service container; they are not
+          # secrets and are not reused anywhere.
+          POSTGRES_USER: scholarmind
+          POSTGRES_PASSWORD: scholarmind
+          POSTGRES_DB: scholarmind
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U scholarmind -d scholarmind"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+    env:
+      DATABASE_URL: postgresql+psycopg://scholarmind:scholarmind@localhost:5432/scholarmind
+      PYTHONPATH: services/api:.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: services/api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r services/api/requirements.txt
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest tests -q

@@ -1,0 +1,26 @@
+{
+  "_comment": "CI regression thresholds for the metrics gated in docs/EVALUATION.md section 18.1. These values may only be TIGHTENED on the dev split (raising a quality floor, lowering a rate ceiling) when a run on the dev split justifies the new value. They must NEVER be relaxed to make a pull request pass. Relaxing a threshold requires all of: (1) a written justification in the pull-request description explaining why the previous threshold was wrong, (2) approval from a reviewer other than the author, (3) a re-baseline commit that archives a fresh full dev-split run as the new baseline, and (4) a changelog entry naming the old value, the new value and the reason. Held-out splits never set or validate a threshold.",
+  "split": "dev",
+  "metrics": {
+    "false_eligible_rate": {
+      "direction": "max",
+      "threshold": 0.05,
+      "source": "docs/EVALUATION.md 18.1 (eligibility, B1)"
+    },
+    "citation_precision": {
+      "direction": "min",
+      "threshold": 0.9,
+      "source": "docs/EVALUATION.md 18.1 (section 4.2)"
+    },
+    "answer_correctness": {
+      "direction": "min",
+      "threshold": 0.75,
+      "source": "docs/EVALUATION.md 18.1 (section 4.2)"
+    },
+    "recall_at_10": {
+      "direction": "min",
+      "threshold": 0.8,
+      "source": "docs/EVALUATION.md 18.1 (section 4.1)"
+    }
+  }
+}
