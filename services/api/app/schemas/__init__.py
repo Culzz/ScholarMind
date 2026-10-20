@@ -1,1 +1,1 @@
-﻿"""ScholarMind API package."""
+"""ScholarMind API package."""
