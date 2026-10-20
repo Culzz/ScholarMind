@@ -155,17 +155,19 @@ export function handleSummary(data) {
   const failed = data.metrics.http_req_failed;
   const checks = data.metrics.checks;
 
+  const p95 = assistant && assistant.values ? assistant.values['p(95)'] : null;
+  const failedRate = failed && failed.values ? failed.values.rate : null;
+  const checkRate = checks && checks.values ? checks.values.rate : null;
+
   const lines = [];
   lines.push('ScholarMind load profile summary');
   lines.push(`  target:            ${BASE_URL}`);
+  lines.push(`  assistant p95:     ${p95 === null ? 'n/a' : p95.toFixed(0)} ms`);
   lines.push(
-    `  assistant p95:     ${assistant ? assistant.values['p(95)'].toFixed(0) : 'n/a'} ms`,
+    `  http_req_failed:   ${failedRate === null ? 'n/a' : (failedRate * 100).toFixed(2)}%`,
   );
   lines.push(
-    `  http_req_failed:   ${failed ? (failed.values.rate * 100).toFixed(2) : 'n/a'}%`,
-  );
-  lines.push(
-    `  checks passed:     ${checks ? (checks.values.rate * 100).toFixed(2) : 'n/a'}%`,
+    `  checks passed:     ${checkRate === null ? 'n/a' : (checkRate * 100).toFixed(2)}%`,
   );
   lines.push('');
   lines.push('Record this run under research/experiments/ before citing it.');
