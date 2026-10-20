@@ -1,0 +1,198 @@
+# ScholarMind source manifest — Nigeria-first corpus, 2027 intake.
+#
+# This file is the ingestion allowlist. A URL that is not listed here is never fetched.
+#
+# Fields
+#   url            canonical official page (must be an official domain)
+#   name           human label used in the admin UI
+#   provider_type  government | university | foundation | ngo | corporate | multilateral
+#   trust_tier     official_primary | official_secondary | partner | aggregator
+#   cadence_hours  how often the source is re-checked (24 = daily, 168 = weekly)
+#   scope          countries the opportunity targets ([] = any / stated on page)
+#   level          intended study level
+#   notes          ingestion notes (JS-rendered, PDF, portal, etc.)
+#
+# The aggregator tier is for discovery hints only: aggregator pages are never used as
+# the source of a confirmed fact.
+
+version: 1
+corpus: nigeria_v1
+target_intake_year: 2027
+
+defaults:
+  trust_tier: official_primary
+  cadence_hours: 168
+  level: masters
+
+sources:
+  # --- Government / national schemes -------------------------------------
+  - url: https://www.ptdf.gov.ng/
+    name: PTDF Overseas Scholarships
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 24
+    notes: portal; confirm whether the cycle page is static or JS-rendered
+
+  - url: https://www.ndpc.gov.ng/
+    name: NDDC Scholarship Programme
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 24
+
+  - url: https://www.setd.ng/
+    name: SETD Postgraduate Scholarship
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 24
+
+  - url: https://www.nuprc.gov.ng/
+    name: NUPRC Scholarship
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 168
+
+  - url: https://www.nnpcgroup.com/
+    name: NNPC Postgraduate Scholarship
+    provider_type: government
+    scope: [NGA]
+    cadence_hours: 168
+
+  # --- International funders ------------------------------------------------
+  - url: https://www.chevening.com/scholarships/
+    name: Chevening Scholarships
+    provider_type: government
+    scope: []
+    level: masters
+    cadence_hours: 24
+
+  - url: https://www.commonwealthscholarships.org/
+    name: Commonwealth Scholarships
+    provider_type: intergovernmental
+    scope: []
+    level: masters
+    cadence_hours: 24
+
+  - url: https://daad.de/en/studying-in-germany/scholarships/
+    name: DAAD Development-Related Scholarships
+    provider_type: intergovernmental
+    scope: []
+    cadence_hours: 168
+
+  - url: https://www.fulbrightscholarships.org/
+    name: Fulbright Foreign Student Program
+    provider_type: government
+    scope: []
+    cadence_hours: 168
+
+  - url: https://www.pearson.com/gle/undergraduate-pearson-scholarship-fund.html
+    name: Pearson Scholarship Fund
+    provider_type: foundation
+    scope: []
+    level: bachelors
+    cadence_hours: 168
+
+  - url: https://www.mastercardfdn.org/scholarships
+    name: Mastercard Foundation Scholars
+    provider_type: foundation
+    scope: []
+    cadence_hours: 168
+
+  - url: https://www.weforum.org/people/canonical/learning-and-skills/
+    name: Schwab Foundation Scholars (verification pending)
+    provider_type: foundation
+    scope: []
+    cadence_hours: 168
+    notes: verify the official application domain before enabling ingestion
+
+  - url: https://www.wellsfargo.com/about/corporate/press-room/
+    name: Wells Fargo International Fellowship
+    provider_type: corporate
+    scope: []
+    cadence_hours: 168
+    notes: needs a stable programme page; the press room is a placeholder
+
+  # --- Research foundations ----------------------------------------------
+  - url: https://www.mrc.ukri.org/funding/
+    name: UKRI/MRC Studentships
+    provider_type: government
+    scope: []
+    level: phd
+    cadence_hours: 168
+
+  - url: https://www.aas.net/graduatestudentgrants
+    name: AAS Graduate Student Grants
+    provider_type: foundation
+    scope: []
+    level: phd
+    cadence_hours: 168
+
+  - url: https://www.gatesfoundation.org/education/awards
+    name: Gates Cambridge Scholarship
+    provider_type: foundation
+    scope: []
+    level: phd
+    cadence_hours: 168
+
+  # --- University funding routes -----------------------------------------
+  - url: https://www.ox.ac.uk/clarendon
+    name: Clarendon Scholarship
+    provider_type: university
+    scope: []
+    level: phd
+    cadence_hours: 168
+
+  - url: https://www.cam.ac.uk/postgraduate/finance/funding/
+    name: Cambridge Funding
+    provider_type: university
+    scope: []
+    cadence_hours: 168
+
+  - url: https://www.ed.ac.uk/student-funding/postgraduate/research
+    name: Edinburgh Research Scholarships
+    provider_type: university
+    scope: []
+    level: phd
+    cadence_hours: 168
+
+  - url: https://www.manchester.ac.uk/study/postgraduate/finance/funding/
+    name: Manchester postgraduate funding
+    provider_type: university
+    scope: []
+    cadence_hours: 168
+
+  - url: https://www.wits.ac.za/study/postgraduate/finances/
+    name: Wits University postgraduate funding
+    provider_type: university
+    scope: [ZAF]
+    cadence_hours: 168
+
+  - url: https://www.uct.ac.za/finance/postgraduate-funding
+    name: UCT postgraduate funding
+    provider_type: university
+    scope: [ZAF]
+    cadence_hours: 168
+
+  - url: https://www.aku.edu.ng/
+    name: American University of Nigeria scholarships
+    provider_type: university
+    scope: [NGA]
+    cadence_hours: 168
+
+  - url: https://www.unilag.edu.ng/
+    name: University of Lagos postgraduate admissions
+    provider_type: university
+    scope: [NGA]
+    cadence_hours: 168
+
+  # --- Application portals (process + deadline verification) ---------------
+  - url: https://apply.chevening.com/
+    name: Chevening application portal
+    provider_type: government
+    scope: []
+    cadence_hours: 24
+    notes: gated; treat content as unverified unless publicly readable
+
+# --- Discovery-only hints (never a source of confirmed facts) ---------------
+discovery_hints:
+  - https://www.scholarshippositions.com/
+  - https://www.scholars4dev.com/

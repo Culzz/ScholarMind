@@ -1,0 +1,25 @@
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential curl libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/api/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY scholarmind/ ./scholarmind/
+COPY services/api/ ./services/api/
+COPY services/worker/ ./services/worker/
+
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Worker has no HTTP port; liveness is reported through the Redis heartbeat read by the API.
+CMD ["celery", "-A", "services.worker.celery_app:celery_app", "worker", "--loglevel=info"]
