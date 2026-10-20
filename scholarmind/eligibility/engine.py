@@ -207,14 +207,16 @@ def _compare(left: Any, comparator: Comparator, right: Any) -> bool:
     if comparator is Comparator.ABSENT:
         return not left
     if comparator in (Comparator.GTE, Comparator.LTE, Comparator.BETWEEN):
+        if comparator is Comparator.BETWEEN:
+            if not isinstance(left, _NUMERIC) or not isinstance(right, (list, tuple)) or len(right) != 2:
+                raise TypeError("between comparison requires a number and a two-element range")
+            low, high = right
+            return low <= left <= high
         if not isinstance(left, _NUMERIC) or not isinstance(right, _NUMERIC):
             raise TypeError(f"numeric comparison requires numbers, got {type(left)!r}/{type(right)!r}")
         if comparator is Comparator.GTE:
             return left >= right
-        if comparator is Comparator.LTE:
-            return left <= right
-        low, high = right
-        return low <= left <= high
+        return left <= right
     raise ValueError(f"unsupported comparator: {comparator}")
 
 

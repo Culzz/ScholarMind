@@ -1,1 +1,1 @@
-﻿# retrieval module.
+# retrieval module.

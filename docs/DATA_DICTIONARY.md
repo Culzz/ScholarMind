@@ -133,8 +133,18 @@ Index: `(cycle_id)`.
 | `is_mandatory` | BOOL | |
 | `description` | TEXT | |
 | `lead_time_days` | INT | Estimated preparation lead time (used by the planner) |
+| `country_scope` | JSONB | array of ISO3 the document applies to (empty = all) |
+| `requires_notarization` | BOOL | |
+| `requires_apostille` | BOOL | |
+| `requires_credential_evaluation` | BOOL | |
+| `lead_time_days_default` | INT | Fallback lead time when no country-specific value applies |
+| `issue_window_note` | TEXT | Issuance-window caveats (e.g. academic referee availability) |
 | `evidence_ids` | JSONB | |
 | `created_at/updated_at` | TIMESTAMPTZ | |
+
+`country_scope`, `requires_notarization`, `requires_apostille`, `requires_credential_evaluation`,
+`lead_time_days_default` and `issue_window_note` feed the backward planner, which schedules
+document tasks backwards from the real deadline using the applicable country's lead times.
 
 ---
 
@@ -353,7 +363,226 @@ Gold dataset (also versioned in `data/fixtures/eval/*.jsonl`).
 
 ---
 
-## 6. Relationship summary
+## 6. Part II additions — new tables
+
+### `profile_questions`
+Questions produced by the Smart Question Engine. Each question is chosen to resolve the most
+unknowns across the shortlist.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK→users |
+| `question_text` | TEXT | |
+| `resolves_unknown_count` | INT | Unknown rules this question would resolve |
+| `affected_rule_ids` | JSONB | array of eligibility_rules.id |
+| `source_cycle_ids` | JSONB | array of scholarship_cycles.id |
+| `priority_score` | FLOAT | Information gain weighted by source criticality |
+| `status` | TEXT | CHECK in (`asked`, `answered`, `skipped`, `deferred`) |
+| `answered_at` | TIMESTAMPTZ | |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `unlock_paths`
+Counterfactual eligibility. Computed by re-running the deterministic rule engine against a mutated
+profile — never by asking a model to speculate.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK→users |
+| `profile_change_subject` | TEXT | Profile field mutated (e.g. `ielts.overall`, `gpa.min_overall`, `age`) |
+| `profile_change_from` | JSONB | Current value |
+| `profile_change_to` | JSONB | Proposed value |
+| `unlocked_cycle_ids` | JSONB | array of scholarship_cycles.id |
+| `unlocked_count` | INT | Cycles unlocked by the change |
+| `effort_note` | TEXT | Implied effort (e.g. "test retake ~8 weeks") |
+| `rule_ids_affected` | JSONB | array of eligibility_rules.id |
+| `evidence_ids` | JSONB | array of evidence_claims.id |
+| `computed_at` | TIMESTAMPTZ | |
+| `engine_version` | TEXT | Rule-engine version used for the mutation |
+
+### `grade_mappings`
+Converts an African grade scale into the scale a funder requires, with the rule source cited.
+"Minimum grade", "minimum average" and "percentile" are kept distinct.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `cycle_id` | UUID | FK→scholarship_cycles |
+| `requirement_rule_id` | UUID | FK→eligibility_rules |
+| `source_scale` | TEXT | CHECK in (`first_class`, `second_class_upper`, `second_class_lower`, `cgpa_5`, `cgpa_4`, `gpa_4`, `percentage`, `other`) |
+| `source_min_value` | TEXT | Verbatim source value (e.g. `Second Class Upper`) |
+| `target_scale` | TEXT | Scale stated by the funder |
+| `target_min_value` | NUMERIC(8,3) | |
+| `equivalence_rule` | TEXT | Equivalence applied (e.g. `second_class_upper >= cgpa_4 3.5`) |
+| `is_exact_match` | BOOL | Equivalence is exact, not approximate |
+| `evidence_ids` | JSONB | array of evidence_claims.id |
+| `source_snapshot_id` | UUID | FK→source_snapshots |
+| `validation_status` | TEXT | CHECK in (`confirmed`, `ambiguous`, `unresolved`) |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `waiver_rules`
+Waivers of a stated requirement. Modelled per source with evidence; never a global assumption.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `cycle_id` | UUID | FK→scholarship_cycles |
+| `waiver_kind` | TEXT | CHECK in (`english_medium_degree`, `prior_english_medium_study`, `accepted_exemption`, `other`) |
+| `description` | TEXT | |
+| `conditions` | TEXT | Conditions the waiver depends on |
+| `evidence_ids` | JSONB | array of evidence_claims.id |
+| `source_snapshot_id` | UUID | FK→source_snapshots |
+| `validation_status` | TEXT | CHECK in (`confirmed`, `ambiguous`, `unresolved`) |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `document_vault_entries`
+The user's own documents with issue/expiry tracking. Expiry warnings feed the planner.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK→users |
+| `doc_type` | TEXT | CHECK in (`passport`, `ielts`, `toefl`, `transcript`, `reference_letter`, `nysc`, `certificate`, `credential_evaluation`, `other`) |
+| `label` | TEXT | |
+| `issued_on` | DATE | |
+| `expires_on` | DATE | |
+| `status` | TEXT | CHECK in (`missing`, `in_progress`, `valid`, `expiring_soon`, `expired`) |
+| `institution_or_issuer` | TEXT | |
+| `file_reference` | TEXT | Pointer to the stored object; never file content |
+| `notes` | TEXT | |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `scam_signals`
+Signals that reduce a source's effective trust tier.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `source_document_id` | UUID | FK→source_documents |
+| `signal_type` | TEXT | CHECK in (`lookalike_domain`, `non_official_portal`, `application_fee_present`, `no_contact_details`, `tls_anomaly`, `contradicts_funder`, `page_redesign`) |
+| `severity` | TEXT | CHECK in (`low`, `medium`, `high`) |
+| `detail` | TEXT | |
+| `detected_at` | TIMESTAMPTZ | |
+| `detection_method` | TEXT | `rule`, `llm`, `manual` |
+| `status` | TEXT | CHECK in (`open`, `confirmed`, `dismissed`) |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `cycle_predictions`
+Estimates of future cycle windows, derived from archived past cycles.
+
+> **Estimates only.** Rows in this table MUST NEVER be used to filter "open" results, to satisfy
+> eligibility rules, or to assert a deadline. Every row carries `is_estimate = TRUE` and is
+> rendered as an estimate.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `scholarship_id` | UUID | FK→scholarships |
+| `predicted_intake_year` | INT | |
+| `predicted_open_date` | DATE | |
+| `predicted_close_date` | DATE | |
+| `method` | TEXT | CHECK in (`median_day_of_year`, `interpolated`, `manual`) |
+| `confidence` | TEXT | CHECK in (`low`, `medium`, `high`) |
+| `supporting_snapshot_ids` | JSONB | array of source_snapshots.id |
+| `is_estimate` | BOOL | DEFAULT TRUE |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `selection_criteria`
+Selection criteria stated by a funder, used by the readiness studio.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `cycle_id` | UUID | FK→scholarship_cycles |
+| `criterion_text` | TEXT | |
+| `category` | TEXT | CHECK in (`academic`, `research`, `personal`, `motivation`, `work`) |
+| `is_mandatory` | BOOL | |
+| `weight` | NUMERIC(4,3) | Relative weight |
+| `evidence_ids` | JSONB | array of evidence_claims.id |
+| `source_snapshot_id` | UUID | FK→source_snapshots |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `readiness_evidence`
+The user's own CV evidence, mapped to a selection criterion.
+
+> Rows must originate from the user. The system never fabricates or auto-generates achievement
+> text.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK→users |
+| `selection_criterion_id` | UUID | FK→selection_criteria, NULL |
+| `evidence_text` | TEXT | Verbatim user text |
+| `source` | TEXT | CHECK in (`user_entry`, `document_upload`) |
+| `is_user_supplied` | BOOL | DEFAULT TRUE |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+### `community_corrections`
+User-reported errors feeding the review queue. Verified corrections require a reviewer and a
+timestamp.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `reporter_user_id` | UUID | FK→users |
+| `scholarship_id` | UUID | FK→scholarships, NULL |
+| `cycle_id` | UUID | FK→scholarship_cycles, NULL |
+| `field_name` | TEXT | Field the reporter claims is wrong |
+| `claimed_value` | JSONB | Value the reporter asserts |
+| `note` | TEXT | |
+| `reporter_reputation` | INT | DEFAULT 0 |
+| `status` | TEXT | CHECK in (`submitted`, `verified`, `rejected`) |
+| `verified_by` | UUID | FK→users, NULL |
+| `verified_at` | TIMESTAMPTZ | |
+| `created_at` | TIMESTAMPTZ | |
+
+### `evaluation_judgments`
+Human labels used to validate the LLM judge (judge-vs-human agreement, Cohen's κ).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `answer_audit_id` | UUID | FK→answer_audits |
+| `claim_index` | INT | Index into `answer_audits.answer_claims` |
+| `human_label` | TEXT | CHECK in (`supported`, `unsupported`, `partial`) |
+| `judge_label` | TEXT | Judge label for the same claim |
+| `agreement` | BOOL | |
+| `annotator_id` | UUID | FK→users |
+| `created_at` | TIMESTAMPTZ | |
+
+### `extraction_audit_samples`
+The human audit of extracted facts: a random 10% sample of `evidence_claims` verified by hand.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `evidence_claim_id` | UUID | FK→evidence_claims |
+| `fact_type` | TEXT | CHECK in (`deadline`, `funding`, `rule`, `document`, `other`) |
+| `is_correct` | BOOL | |
+| `annotator_id` | UUID | FK→users |
+| `annotator_notes` | TEXT | |
+| `created_at` | TIMESTAMPTZ | |
+
+### `ci_thresholds`
+Regression-gate thresholds. A PR fails when a committed metric falls below its threshold.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID | PK |
+| `metric_key` | TEXT | UNIQUE, e.g. `false_eligible_rate` |
+| `metric_value` | NUMERIC(12,6) | |
+| `comparison` | TEXT | CHECK in (`gte`, `lte`) |
+| `experiment_id` | TEXT | |
+| `dataset_version` | TEXT | |
+| `effective_from` | TIMESTAMPTZ | |
+| `is_active` | BOOL | |
+| `created_at/updated_at` | TIMESTAMPTZ | |
+
+---
+
+## 7. Relationship summary
 
 ```
 source_documents 1─n source_snapshots 1─n evidence_chunks 1─n evidence_claims
@@ -374,7 +603,7 @@ users 1─n answer_audits
 
 ---
 
-## 7. Data-quality rules (enforced in services + CI checks)
+## 8. Data-quality rules (enforced in services + CI checks)
 
 1. Every `scholarships` row has a non-null `canonical_source_id` with `trust_tier` in official tiers.
 2. Every `scholarship_cycles` row has `intake_year` and a status; `deadline_at` NULL allowed only when `deadline_raw_text` exists and `deadline_precision != 'unknown'` is false → status `undetermined`.
@@ -385,9 +614,34 @@ users 1─n answer_audits
 7. `student_profiles.gpa_value` requires `gpa_scale`.
 8. `answer_audits.citation_map` must only reference chunk ids present in the same row's `retrieved_chunk_ids`.
 9. Deleted users → cascade personal data; `answer_audits` retain only de-identified questions.
+10. Grade mappings must carry at least one evidence id and a `validation_status`; unvalidated mappings may not drive a satisfied eligibility verdict.
+11. `cycle_predictions.is_estimate` must be TRUE for every row and the table must not be joined by the "currently open" filter.
+12. `scam_signals` with severity `high` must force the source's effective trust tier to be reduced to `aggregator` until a human dismisses it.
+13. `readiness_evidence.is_user_supplied` must be TRUE for every row.
+14. `community_corrections` with status `verified` must reference a reviewer and a timestamp.
 
-## 8. Retention & privacy
+### Retention & privacy
 - `source_snapshots.raw_content`: retained indefinitely (public information, supports re-extraction).
 - Profile PII: retained while the account is active; hard-delete on account deletion (cascade).
 - `answer_audits`: 24 months rolling, de-identified on export.
 - Document uploads (future): 90 days default, user-deletable.
+- `document_vault_entries`, `readiness_evidence` and `community_corrections` are personal data and are subject to the same export/delete cascade as `student_profiles`.
+
+---
+
+## 9. Part II additions — summary of new relations
+
+- `profile_questions` → `users`; references `eligibility_rules` and `scholarship_cycles` by id in JSONB.
+- `unlock_paths` → `users`; references `scholarship_cycles`, `eligibility_rules` and `evidence_claims` by id in JSONB.
+- `grade_mappings` → `scholarship_cycles`, `eligibility_rules`, `source_snapshots`; `evidence_ids` → `evidence_claims`.
+- `waiver_rules` → `scholarship_cycles`, `source_snapshots`; `evidence_ids` → `evidence_claims`.
+- `document_vault_entries` → `users`; doc types align with `required_documents.doc_type` for the planner.
+- `scam_signals` → `source_documents`; feeds the effective trust tier of `source_documents` / `scholarships`.
+- `cycle_predictions` → `scholarships`; `supporting_snapshot_ids` → `source_snapshots`. Never joined by "open" filters.
+- `selection_criteria` → `scholarship_cycles`, `source_snapshots`; `evidence_ids` → `evidence_claims`.
+- `readiness_evidence` → `users`, `selection_criteria`.
+- `community_corrections` → `users` (reporter, verifier), `scholarships`, `scholarship_cycles`.
+- `evaluation_judgments` → `answer_audits`, `users` (annotator).
+- `extraction_audit_samples` → `evidence_claims`, `users` (annotator).
+- `ci_thresholds` → standalone; keyed to `experiment_id` / `dataset_version` used by `evaluation_runs`.
+

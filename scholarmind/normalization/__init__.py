@@ -1,1 +1,1 @@
-﻿# normalization module.
+# normalization module.

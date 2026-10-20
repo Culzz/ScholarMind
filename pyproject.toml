@@ -1,0 +1,22 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["services/api", "."]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: requires a live Postgres (services/api/migrations)",
+    "architecture: enforces structural rules on the codebase",
+    "slow: long-running tests",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["services/api/migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"services/api/migrations/*" = ["E501"]
+"tests/*" = ["E501"]

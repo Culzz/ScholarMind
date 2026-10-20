@@ -438,4 +438,157 @@ software versions, latency and cost.
 
 ---
 
-*Blueprint v1 — Companion docs: `SRS.md`, `ARCHITECTURE.md`, `DATA_DICTIONARY.md`, `EVALUATION.md`, `SECURITY.md`, `MODEL_CARD.md`, `DEPLOYMENT.md` (all under `docs/`).*
+---
+
+# Part II — Feature Expansion (added 2026-10-20)
+
+The core phases (Part I §10) are **unchanged and still gate the build**. This part layers the
+following capabilities onto those phases. Every addition inherits the Part I rules: facts require
+provenance, the LLM never authors facts, unknowns stay unknown, and no metric ships unmeasured.
+
+## A. Delivery priority
+
+| Priority | Capability | Phase | Distinct demo? |
+|---|---|---|---|
+| **P0** | Claim-level verifier | 04 | Yes — shows unsupported claims being caught live |
+| **P0** | Unlock Paths (counterfactual eligibility) | 05 | Yes — "change this one thing, unlock N scholarships" |
+| **P1** | Grade mapper (African grade scales) | 05 | Yes — the moat; nobody else normalizes First Class / 2:1 / CGPA 5.0 |
+| **P1** | Backward planner with real lead times | 07 | Yes — NYSC, notarisation, credential evaluation |
+| **P1** | ScholarBench-Africa + CI regression gate | 04/09 | Research credibility |
+| **P2** | Smart Question Engine | 05 | Replaces the onboarding form |
+| **P2** | Conflict resolver with trust hierarchy | 05 | Trust differentiator |
+| **P2** | Scam & trust scoring | 05/06 | Safety differentiator |
+| **P2** | Explainable ranking with sliders | 06 | Transparency differentiator |
+| **P3** | Readiness studio, document vault, comparison funding breakdown | 06/07 | Product depth |
+| **P3** | Admin review console, "what changed this week" feed | 07/08 | Ops depth |
+| **P3** | Low-bandwidth PWA, exports (.ics/PDF/CSV) | 07/08 | Reach |
+| **P4** | Cycle prediction, community corrections, pathway graph, multilingual (FR) | 09+ | Stretch |
+
+## B. Intelligence layer additions
+
+### B1. Claim-level verifier (Phase 04)
+- Every generated claim is checked against its cited excerpt with an entailment check.
+- Two implementations, both measured: (a) a lexical/semantic support proxy (already in
+  `scholarmind/generation/validation.py`), (b) an NLI model or LLM judge **calibrated against
+  human-labelled claims**.
+- Unsupported claims are **removed** from the answer, or surfaced as `⚠️ unverified` with the
+  citation removed — never silently kept.
+- **Reported metric:** citation precision before vs. after the verifier, on the same answers.
+- Judge calibration gate: if judge-vs-human agreement (Cohen's κ) < 0.7, the LLM judge may not be
+  used as the primary verifier.
+
+### B2. Unlock Paths (Phase 05)
+- Counterfactual eligibility: for a profile, compute which single profile change (IELTS band, GPA
+  threshold, age, work-experience months, field of study, nationality eligibility) flips the most
+  `not_satisfied` / `unknown` rules into `satisfied` across the shortlist.
+- Output: `"Raise IELTS to 7.0 → unlocks 6 of 12 shortlisted scholarships (est. 2 new funding routes)"`.
+- Implemented by **re-running the deterministic rule engine** with a mutated profile — never by asking
+  a model to speculate.
+- Every unlock path cites the rule ids and evidence that changed, and states the *effort* implied
+  (e.g. "IELTS 6.0 → 7.0 requires a test retake: ~8 weeks").
+
+### B3. Smart Question Engine (Phase 05)
+- Asks the **one** profile question that resolves the most unknowns across the shortlist, chosen by
+  information gain: `unknowns_resolved(question) = |rules_shortlisted_affected|` weighted by
+  source criticality.
+- Replaces the long onboarding form with progressive disclosure. The same engine powers the
+  "what would you like to know?" follow-up prompts in the assistant.
+
+### B4. Conflict resolver (Phase 05)
+- Trust-tier hierarchy for conflicts: `funder (official_primary) > university page >
+  government portal > aggregator`.
+- A resolution proposes the higher-tier value, but **never marks the conflict closed** on its own:
+  high-impact conflicts (deadline, funding, eligibility) enter a human review queue.
+- Both values remain visible to the user regardless of proposal.
+
+### B5. Cycle prediction (Phase 05)
+- Estimate the next opening window from archived past cycles (median day-of-year with an IQR).
+- Stored in `cycle_predictions`, always rendered as **"estimate"**, never as a fact, never used to
+  filter "open" results, and excluded from eligibility evaluation.
+
+## C. African-applicant capability (the moat)
+
+| Capability | Detail |
+|---|---|
+| **Grade mapper** | First Class / Second Class Upper (2:1) / 2:2 / CGPA 5.0 / CGPA 4.0 / GPA 4.0 / percentage → each funder's stated requirement, with the rule source cited. Handles "minimum grade" vs "minimum average" vs "percentile" without conflating them. |
+| **Waiver rules** | English-medium degree, prior English-medium study, exemptions accepted by specific institutions. Modelled per source with evidence; never a global assumption. |
+| **Backward planner lead times** | Transcript issuance, referee letter (incl. academic referee availability windows), NYSC certificate, credential evaluation (WES/ECE), document notarisation, apostille, English test validity. Lead times are configurable per document type and per country. |
+| **Scam & trust scoring** | Signals: look-alike domains, non-official application portals, application fees on official-looking sites, missing contact details, TLS/certificate anomalies, contradiction between the site and the official funder. Produces a `trust_score` and a `scam_risk` band per source, feeding the existing trust tiers. |
+| **Low-bandwidth PWA** | Offline shortlist, cached scholarship summaries, small payloads (< 200 KB first load), no heavy chart bundles on mobile. |
+| **Cost-of-application estimator** | Test fees, courier/postage, credential evaluation, notarisation, transcript fees — as an estimate band with a currency and a "prices change, verify with the provider" disclaimer. |
+
+## D. Evaluation & research additions
+
+| Addition | Method | Output |
+|---|---|---|
+| **ScholarBench-Africa** | Publish the gold set (questions, required evidence ids, labels, per-rule labels) with a dataset card | Public dataset (HuggingFace or repo `research/bench/`) + versioned JSONL |
+| **Adversarial suite** | Injection pages, expired-cycle questions, near-duplicate scholarships (same award, two pages), conflicting deadlines | Pass/fail gate in CI |
+| **Extractor calibration** | Reliability curve: bin extracted facts by confidence, human-verify each bin, plot precision per bin | Calibration curve + expected-calibration-error |
+| **Human extraction audit** | Random 10% of extracted facts manually verified | Extraction accuracy by fact type (deadline, funding, rule, document) with CIs |
+| **LLM-judge validation** | Judge vs. human agreement on a labelled claim set | Cohen's κ; judge demoted if κ < 0.7 |
+| **Cost & latency report** | Per-configuration cost per query, p50/p95 latency | Table in the model card and the paper |
+| **Property-based tests** | Hypothesis over the eligibility engine: no profile ever yields `satisfied` for a missing fact; `not_satisfied` never coexists with a satisfied mandatory rule for the same subject; determinism under permutation | CI gate |
+| **Load test** | k6/Locust over retrieval + assistant endpoints | p95 latency, error rate, saturation point |
+
+## E. Product additions
+
+- **Readiness studio** — map the user's own CV evidence to a scholarship's selection criteria and
+  flag gaps. It never fabricates accomplishments, never rewrites the user's CV, never creates
+  references, and never claims an application meets a requirement without evidence.
+- **Document vault** — per-document checklist with issue/expiry tracking (passport validity, IELTS
+  validity, referee status), with expiry warnings feeding the planner.
+- **Comparison with funding breakdown** — tuition, stipend, travel, accommodation, insurance, each
+  marked `confirmed | excluded | conditional | unknown` with the source and check time.
+- **Explainable ranking** — transparent weighted score (deadline urgency, confirmed eligibility,
+  funding fit, effort) with **user-adjustable sliders**; the weight vector is shown and recorded.
+  Learning-to-rank only if real (non-synthetic) relevance labels are collected.
+- **Admin review console** — diffs, conflicts, low-confidence extractions, scam flags, dead jobs.
+- **"What changed this week" public feed** — verified change events only (approved or
+  high-confidence), no unverified diffs.
+- **Exports** — `.ics` calendar (personal + cycle deadlines), PDF application plan, CSV shortlist.
+
+## F. Engineering additions
+- **Observability** — structured logs, per-answer traces (retrieval → generation → validation), an
+  evaluation dashboard fed by `evaluation_runs`.
+- **Prompt/model versioning + replay** — every `answer_audits` row stores model id, prompt version,
+  retrieval config and snapshot ids; an answer can be **replayed** against current data to show what
+  changed since it was produced.
+- **CI regression gate** — a PR fails if false-eligible rate, citation precision, or answer
+  correctness drops below committed thresholds (thresholds set from the dev split, never tuned on
+  held-out).
+- **Security testing** — a tested threat model covering prompt injection, SSRF, and cross-user
+  access, executed as automated tests, not only as documentation.
+
+## G. New entities introduced by Part II
+
+`profile_questions` · `unlock_paths` · `grade_mappings` · `waiver_rules` · `document_vault_entries` ·
+`scam_signals` · `cycle_predictions` · `selection_criteria` · `readiness_evidence` ·
+`community_corrections` · `evaluation_judgments` · `extraction_audit_samples` · `ci_thresholds`
+
+Full column definitions live in `docs/DATA_DICTIONARY.md`.
+
+## H. Stretch (post-release-7)
+- **Pathway graph** — scholarships ↔ programmes ↔ funders ↔ eligibility conditions, built relationally
+  in Postgres first; graph infrastructure only if measured queries justify it.
+- **Multilingual** — French support for Francophone African scholarship sources (extraction, search,
+  and answer generation), with per-language evaluation.
+- **Community corrections** — verified user-reported errors feeding the review queue, with reputation
+  weighting and abuse controls.
+
+## I. Revised phase map (Part I phases unchanged; additions marked ★)
+
+| Phase | Weeks | ★ additions |
+|---|---|---|
+| 01 Skeleton | 1 | — |
+| 02 Ingestion | 2–3 | ★ scam signal collection during fetch |
+| 03 Extraction | 3–4 | ★ grade mapper extraction, waiver extraction, calibration instrumentation |
+| 04 Retrieval & answers | 5–7 | ★ claim-level verifier, adversarial suite, ScholarBench-Africa v1, judge calibration |
+| 05 Eligibility & freshness | 8–10 | ★ Unlock Paths, Smart Question Engine, conflict resolver, cycle prediction |
+| 06 Frontend | 11–13 | ★ readiness studio, funding-breakdown comparison, ranking sliders, PWA shell |
+| 07 Planner & alerts | 14–15 | ★ backward planner lead times, document vault, exports, change feed |
+| 08 Hardening | 16–17 | ★ property-based tests, load test, regression gate, replay |
+| 09 Research release | 18 | ★ calibration curve, human extraction audit, cost/latency report, pathway graph spike |
+
+---
+
+*Blueprint v1.1 — Companion docs: `SRS.md`, `ARCHITECTURE.md`, `DATA_DICTIONARY.md`, `EVALUATION.md`, `SECURITY.md`, `MODEL_CARD.md`, `DEPLOYMENT.md` (all under `docs/`).*
