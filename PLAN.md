@@ -4,10 +4,24 @@
 > Not a search wrapper around an LLM: a source-grounded decision-support system with temporal
 > data, explicit eligibility reasoning, personalized ranking, and measurable reliability.
 
-**Status:** blueprint written — Phase 01 (research & data audit) next
+**Status:** Phases 01–05 implemented (schema, API, core domain, worker, evaluation harness, frontend scaffold); corpus capture and measured evaluation results still outstanding
 **Research core:** retrieval quality + eligibility accuracy + temporal change detection
 **Product layer:** Discover · Verify · Compare · Plan · Ask · Track
 **Intake targeted:** 2027 postgraduate cycles
+
+### Build state
+
+| Phase | State |
+|---|---|
+| 01 Skeleton | done — 37 tables across 3 migrations, 32 API endpoints, health + readiness, auth |
+| 02 Ingestion | done — allowlisted manifest, SSRF-safe fetcher, immutable snapshots, scam signals, Celery tasks |
+| 03 Extraction | done — span-anchored facts, typed rules, funding components, documents, normalization, grade mapper |
+| 04 Retrieval & answers | done — hybrid retrieval, evidence-constrained generation, citation validation, claim verifier |
+| 05 Eligibility & freshness | done — rule engine, unlock paths, smart questions, conflict resolver, cycle prediction, change detection |
+| 06 Frontend | scaffold complete; wiring to the final API shapes and the new screens still open |
+| 07 Planner & alerts | planner, lead times and exports done; saved applications, reminders and the document-vault UI open |
+| 08 Hardening | CI pipelines, property tests, load scenario, regression gate, security tests and restore rehearsal open |
+| 09 Research release | bench published, harness running; the measured experiments (A–D), ablations and card fill are open |
 
 ---
 

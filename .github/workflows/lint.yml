@@ -36,8 +36,10 @@ jobs:
 
   web:
     name: Web (eslint, tsc)
-    # The frontend is optional: skip the job when the web app is not present.
-    if: hashFiles('apps/web/package.json') != ''
+    # The frontend is optional. hashFiles() is evaluated on the runner, so it
+    # cannot be used in a job-level `if` (GitHub rejects the whole workflow at
+    # parse time); the frontend steps are guarded individually instead, after
+    # the checkout has populated the workspace.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -53,6 +55,7 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
+        if: hashFiles('apps/web/package.json') != ''
         run: |
           if [ -f package-lock.json ]; then
             npm ci
@@ -62,7 +65,9 @@ jobs:
           fi
 
       - name: Lint
+        if: hashFiles('apps/web/package.json') != ''
         run: npm run lint
 
       - name: Typecheck
+        if: hashFiles('apps/web/package.json') != ''
         run: npm run typecheck

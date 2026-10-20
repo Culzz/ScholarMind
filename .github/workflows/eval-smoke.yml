@@ -36,7 +36,7 @@ jobs:
             --dataset research/bench/bench-v1/questions.jsonl \
             --limit 20 | tee eval-smoke-metrics.md
 
-      - name: Upload the results
+      - name: Upload the metrics and the results
         uses: actions/upload-artifact@v4
         with:
           name: eval-smoke-metrics
@@ -45,16 +45,36 @@ jobs:
             research/experiments/**
           if-no-files-found: warn
 
+  comment:
+    name: comment the metric table
+    needs: eval-smoke
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # Needed only to write the pull-request comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: eval-smoke-metrics
+          path: eval-smoke-metrics
+
       - name: Comment the metric table on the pull request
-        if: github.event_name == 'pull_request'
+        # A pull request from a fork gets a read-only token; the comment is a
+        # convenience, not a gate.
+        continue-on-error: true
         uses: actions/github-script@v7
-        permissions:
-          contents: read
-          pull-requests: write
         with:
           script: |
             const fs = require('fs');
-            const table = fs.readFileSync('eval-smoke-metrics.md', 'utf8');
+            const table = fs.readFileSync(
+              'eval-smoke-metrics/eval-smoke-metrics.md',
+              'utf8',
+            );
             const body = [
               '### Evaluation smoke test',
               '',
