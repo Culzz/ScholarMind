@@ -141,12 +141,21 @@ def validate_answer(
     dropped = 0
 
     for raw in claims:
-        claim = Claim(
-            text=str(raw.get("text", "")).strip(),
-            evidence_ids=[str(i) for i in (raw.get("evidence_ids") or [])],
-            status=str(raw.get("status") or "confirmed"),
-            fact_ref=raw.get("fact_ref"),
-        )
+        if isinstance(raw, Claim):
+            claim = Claim(
+                text=raw.text,
+                evidence_ids=list(raw.evidence_ids),
+                status=raw.status,
+                fact_ref=raw.fact_ref,
+                validation_notes=list(raw.validation_notes),
+            )
+        else:
+            claim = Claim(
+                text=str(raw.get("text", "")).strip(),
+                evidence_ids=[str(i) for i in (raw.get("evidence_ids") or [])],
+                status=str(raw.get("status") or "confirmed"),
+                fact_ref=raw.get("fact_ref"),
+            )
         if not claim.text:
             dropped += 1
             continue

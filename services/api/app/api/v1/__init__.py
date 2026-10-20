@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import health
+from app.api.v1 import assistant, eligibility, health
 
 router = APIRouter()
 router.include_router(health.router)
+router.include_router(assistant.router)
+router.include_router(eligibility.router)

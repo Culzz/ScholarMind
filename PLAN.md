@@ -303,6 +303,9 @@ visible; keyboard navigable; mobile-first responsive; no metric presented as a p
 | GET | `/api/v1/scholarships/{id}/history` | Cycle + source change history |
 | GET | `/api/v1/scholarships/{id}/evidence` | Evidence claims for the record |
 | POST | `/api/v1/eligibility/evaluate` | Profile vs. rules → per-rule verdicts |
+| POST | `/api/v1/eligibility/explain` | Human-readable reasoning trace for a stored assessment |
+| POST | `/api/v1/eligibility/unlock` | Unlock Paths: the profile change that opens the most cycles |
+| POST | `/api/v1/eligibility/questions` | Smart Question Engine: the next most valuable profile question |
 | GET | `/api/v1/eligibility/explain/{assessment_id}` | Human-readable reasoning trace |
 | POST | `/api/v1/assistant/ask` | Evidence-grounded answer |
 | POST | `/api/v1/assistant/verify` | Re-validate a stored answer audit |

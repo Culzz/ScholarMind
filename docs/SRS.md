@@ -110,6 +110,46 @@ Students may be anonymous-browsing (discovery without saving), but profile-depen
 - FR-10.3 Admin can add/pause/disable a source in the manifest and set its refresh cadence.
 - FR-10.4 Admin can trigger a manual re-check of a source.
 - FR-10.5 Admin sees corpus health: sources failing, facts unconfirmed, conflicts open, coverage by country/funder.
+- FR-10.6 Admin sees scam signals raised against sources, with the trust-tier demotion they caused.
+- FR-10.7 Admin can review community corrections and promote a verified correction into a change event.
+
+### FR-11 Claim-level verification
+- FR-11.1 Every generated claim is checked against the excerpt it cites by an entailment verifier.
+- FR-11.2 A claim that fails verification is removed from the answer or marked `⚠️ unverified`; it is never presented as supported.
+- FR-11.3 The verifier used is recorded on the answer audit so results are reproducible.
+- FR-11.4 A model-based judge may only act as the primary verifier after it has been validated against human labels (Cohen's κ ≥ 0.7); until then it runs alongside the deterministic verifier.
+
+### FR-12 Unlock Paths (counterfactual eligibility)
+- FR-12.1 For a profile and a shortlist, the system computes the profile changes that would make additional cycles eligible.
+- FR-12.2 Unlock paths are produced by re-running the deterministic rule engine against mutated profiles — never by model speculation.
+- FR-12.3 A path is offered only when the whole cycle becomes eligible; a cycle that still fails another mandatory rule is not counted as unlocked, and the remaining blockers are listed.
+- FR-12.4 Every path cites the rules it changes, the evidence behind them, and the effort the change implies.
+- FR-12.5 The response is explicitly a prioritisation aid, never a probability of success.
+
+### FR-13 Smart Question Engine
+- FR-13.1 The system asks one profile question at a time, chosen by information gain: the number of open unknowns it resolves across the shortlist, weighted by rule importance.
+- FR-13.2 A field the student has already supplied is never asked again.
+- FR-13.3 A requirement that is ambiguous rather than missing is not turned into a question the student cannot answer.
+- FR-13.4 The endpoint returns the ranked questions, the recommended next question, and the current resolution rate.
+
+### FR-14 Conflict resolution
+- FR-14.1 When official sources disagree, both values are stored and surfaced; neither is asserted as final.
+- FR-14.2 A resolution is proposed using the trust hierarchy `official_primary > official_secondary > partner > aggregator`.
+- FR-14.3 Material fields (deadline, opening date, funding, eligibility, required documents) always require human review before the conflict can be closed.
+- FR-14.4 Sources with equal trust tier are never resolved automatically.
+
+### FR-15 Cycle prediction
+- FR-15.1 The next opening window may be estimated from previous cycles, labelled as an estimate.
+- FR-15.2 Predictions are stored only in `cycle_predictions`, are never used to answer "is this open?", and never satisfy an eligibility rule.
+- FR-15.3 A prediction requires at least two past cycles and records the snapshots it was derived from.
+
+### FR-16 African-applicant capabilities
+- FR-16.1 Grade mapper: converts First Class / Second Class Upper / Second Class Lower / CGPA 5.0 / CGPA 4.0 / GPA 4.0 / credit / percentage between scales using documented anchors and band thresholds, always to the conservative lower bound.
+- FR-16.2 Every conversion is marked exact or approximate, and an approximate cross-scale comparison yields `needs_review` rather than a confident verdict.
+- FR-16.3 Waiver rules (English-medium degree, prior English-medium study, accepted exemptions) are stored per cycle with evidence and are never assumed globally.
+- FR-16.4 The backward planner accounts for document lead times including transcripts, referees, NYSC certificates, credential evaluation, notarisation and apostille.
+- FR-16.5 Scam signals (look-alike domains, application fees on unofficial sites, missing contact details, non-official portals) demote a source's effective trust tier until a human dismisses them.
+- FR-16.6 A cost-of-application estimator returns an estimate band with a currency and a disclaimer that prices change.
 
 ## 5. Non-functional requirements
 
