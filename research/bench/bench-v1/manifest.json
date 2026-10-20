@@ -1,0 +1,136 @@
+{
+  "name": "ScholarBench-Africa",
+  "version": "bench-v1.0",
+  "release_line": "bench-v1",
+  "created": "2026-10-20",
+  "creator": "ScholarMind research track (project owner authored; second annotator pending)",
+  "corpus": "nigeria_v1",
+  "licence": {
+    "questions": "CC BY 4.0",
+    "labels": "CC0 1.0",
+    "tooling": "MIT",
+    "notice": "Provided as is, without warranty of any kind."
+  },
+  "files": [
+    {
+      "path": "bench-v1/questions.jsonl",
+      "bytes": 34829,
+      "sha256": "f0bf7f2426671ebd45c0e5064c219cf8ac5c7969cb1da07154656231d27e52f3",
+      "items": 36
+    },
+    {
+      "path": "bench-v1/eligibility_pairs.jsonl",
+      "bytes": 28908,
+      "sha256": "7e9e6dad78791daf883e17e850124a93a8f8f1f0da68b6c5768cb17f2df29113",
+      "items": 24
+    },
+    {
+      "path": "bench-v1/change_pairs.jsonl",
+      "bytes": 9479,
+      "sha256": "d1516c4e25d60a98cd7278feef51dbce468af59cfe33f12e9f320281ad009ed1",
+      "items": 20
+    },
+    {
+      "path": "bench-v1/adversarial.jsonl",
+      "bytes": 10745,
+      "sha256": "df7362e0acb4e60c797f898387f63fc3fef7260706c915991dcfd08d6945c811",
+      "items": 18
+    }
+  ],
+  "item_counts": {
+    "questions": 36,
+    "eligibility_pairs": 24,
+    "change_pairs": 20,
+    "adversarial": 18,
+    "total": 98
+  },
+  "class_distribution": {
+    "adversarial": 6,
+    "conflict": 6,
+    "eligibility": 6,
+    "fact": 6,
+    "insufficient": 6,
+    "prior_cycle": 6
+  },
+  "class_minimums": {
+    "fact": 40,
+    "eligibility": 40,
+    "conflict": 20,
+    "prior_cycle": 20,
+    "insufficient": 40,
+    "adversarial": 20
+  },
+  "class_shortfall": {
+    "note": "bench-v1 is a scaffold release; every class is below the EVALUATION.md 11.6 minimum. The shortfall is recorded in CHANGELOG.md and repeated here so it is never silent.",
+    "shortfall": {
+      "adversarial": -14,
+      "conflict": -14,
+      "eligibility": -34,
+      "fact": -34,
+      "insufficient": -34,
+      "prior_cycle": -14
+    }
+  },
+  "splits": {
+    "questions": {
+      "dev": 24,
+      "heldout": 12
+    }
+  },
+  "edge_case_distribution": {
+    "ambiguous_wording": 4,
+    "clearly_eligible": 4,
+    "conflicting_requirements": 4,
+    "cycle_specific": 4,
+    "missing_profile_data": 4,
+    "one_mandatory_failure": 4
+  },
+  "overall_status_distribution": {
+    "eligible": 5,
+    "needs_review": 9,
+    "not_eligible": 5,
+    "unknown": 5
+  },
+  "change_type_distribution": {
+    "contact": 1,
+    "cosmetic": 5,
+    "deadline": 3,
+    "document": 2,
+    "eligibility": 3,
+    "funding": 3,
+    "opening_date": 2,
+    "process": 1
+  },
+  "change_control_count": 6,
+  "adversarial_family_distribution": {
+    "conflicting_deadline": 3,
+    "empty_source": 2,
+    "expired_cycle": 3,
+    "fully_funded_trap": 2,
+    "funding_conditional": 2,
+    "injection_page": 4,
+    "near_duplicate": 2
+  },
+  "annotation_status": {
+    "annotators": 1,
+    "annotator_ids": [
+      "ann_primary"
+    ],
+    "second_annotator": "not yet assigned",
+    "adjudication": "not performed; no disagreements have been recorded because only one annotator has labelled the items",
+    "cohens_kappa": null,
+    "kappa_status": "not measurable with a single annotator; a second pass is required before bench-v1.1",
+    "label_status": "authored specification, unverified"
+  },
+  "verification_status": {
+    "verified_items": 0,
+    "unverified_items": 98,
+    "reason": "The source corpus has not been captured yet, so no item can be verified against a live snapshot. Every item carries verified=false and a note naming the field to check."
+  },
+  "content_hashes": {
+    "bench-v1/questions.jsonl": "sha256:f0bf7f2426671ebd45c0e5064c219cf8ac5c7969cb1da07154656231d27e52f3",
+    "bench-v1/eligibility_pairs.jsonl": "sha256:7e9e6dad78791daf883e17e850124a93a8f8f1f0da68b6c5768cb17f2df29113",
+    "bench-v1/change_pairs.jsonl": "sha256:d1516c4e25d60a98cd7278feef51dbce468af59cfe33f12e9f320281ad009ed1",
+    "bench-v1/adversarial.jsonl": "sha256:df7362e0acb4e60c797f898387f63fc3fef7260706c915991dcfd08d6945c811"
+  }
+}
