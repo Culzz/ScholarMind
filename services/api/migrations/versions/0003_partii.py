@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "0003_partii"
 down_revision = "0002_platform"
@@ -27,8 +28,8 @@ def upgrade() -> None:
         sa.Column("user_id", UUID, nullable=False),
         sa.Column("question_text", sa.Text, nullable=False),
         sa.Column("resolves_unknown_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("affected_rule_ids", sa.JSONB, nullable=False, server_default="[]"),
-        sa.Column("source_cycle_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("affected_rule_ids", postgresql.JSONB, nullable=False, server_default="[]"),
+        sa.Column("source_cycle_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("priority_score", sa.Float, nullable=False, server_default="0.0"),
         sa.Column("status", sa.Text, nullable=False, server_default="asked"),
         sa.Column("answered_at", sa.DateTime(timezone=True)),
@@ -43,13 +44,13 @@ def upgrade() -> None:
         sa.Column("id", UUID, primary_key=True),
         sa.Column("user_id", UUID, nullable=False),
         sa.Column("profile_change_subject", sa.Text, nullable=False),
-        sa.Column("profile_change_from", sa.JSONB),
-        sa.Column("profile_change_to", sa.JSONB, nullable=False),
-        sa.Column("unlocked_cycle_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("profile_change_from", postgresql.JSONB),
+        sa.Column("profile_change_to", postgresql.JSONB, nullable=False),
+        sa.Column("unlocked_cycle_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("unlocked_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("effort_note", sa.Text),
-        sa.Column("rule_ids_affected", sa.JSONB, nullable=False, server_default="[]"),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("rule_ids_affected", postgresql.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("computed_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("engine_version", sa.Text, nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
@@ -67,7 +68,7 @@ def upgrade() -> None:
         sa.Column("target_min_value", sa.Numeric(8, 3)),
         sa.Column("equivalence_rule", sa.Text),
         sa.Column("is_exact_match", sa.Boolean, nullable=False, server_default=sa.false()),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("source_snapshot_id", UUID),
         sa.Column("validation_status", sa.Text, nullable=False, server_default="ambiguous"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -84,7 +85,7 @@ def upgrade() -> None:
         sa.Column("waiver_kind", sa.Text, nullable=False),
         sa.Column("description", sa.Text),
         sa.Column("conditions", sa.Text),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("source_snapshot_id", UUID),
         sa.Column("validation_status", sa.Text, nullable=False, server_default="ambiguous"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -119,7 +120,7 @@ def upgrade() -> None:
         sa.Column("category", sa.Text, nullable=False, server_default="academic"),
         sa.Column("is_mandatory", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("weight", sa.Numeric(4, 3)),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("source_snapshot_id", UUID),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -149,7 +150,7 @@ def upgrade() -> None:
         sa.Column("scholarship_id", UUID),
         sa.Column("cycle_id", UUID),
         sa.Column("field_name", sa.Text, nullable=False),
-        sa.Column("claimed_value", sa.JSONB),
+        sa.Column("claimed_value", postgresql.JSONB),
         sa.Column("note", sa.Text),
         sa.Column("reporter_reputation", sa.Integer, nullable=False, server_default="0"),
         sa.Column("status", sa.Text, nullable=False, server_default="submitted"),

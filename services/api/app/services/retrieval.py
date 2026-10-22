@@ -12,6 +12,7 @@ never the evidence behind a confirmed claim.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -66,34 +67,118 @@ class RetrievalResult:
         return {chunk.chunk_id: chunk.content for chunk in self.chunks}
 
 
+_QUERY_STOPWORDS = {
+    "a", "an", "the", "of", "for", "to", "in", "on", "and", "or", "is", "are", "was",
+    "were", "be", "been", "do", "does", "did", "what", "when", "where", "which", "who",
+    "how", "why", "can", "could", "should", "would", "will", "shall", "may", "might",
+    "my", "me", "i", "you", "your", "it", "its", "that", "this", "with", "about",
+}
+
+
+def _build_tsquery(query: str) -> str | None:
+    """Build a PostgreSQL text-search query from a natural-language question.
+
+    ``websearch_to_tsquery`` is AND-based: "tuition fees and stipend" matches
+    only chunks containing every term, which returned nothing on the real
+    corpus. Search should retrieve candidates and let the ranking decide, so the
+    terms are combined with OR and ``ts_rank_cd`` rewards documents that cover
+    more of them. Quoted phrases keep their phrase semantics.
+    """
+    import re
+
+    stripped = query.strip()
+    if not stripped:
+        return None
+
+    if '"' in stripped:
+        return stripped
+
+    terms = [
+        token
+        for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", stripped)
+        if token.lower() not in _QUERY_STOPWORDS and len(token) > 1
+    ]
+    if not terms:
+        return None
+
+    unique: list[str] = []
+    for term in terms:
+        if term.lower() not in {existing.lower() for existing in unique}:
+            unique.append(term)
+    return " | ".join(unique)
+
+
 def _lexical_query(session: Any, query: str, limit: int) -> list[tuple[str, float]]:
+    tsquery = _build_tsquery(query)
+    if not tsquery:
+        return []
     statement = text(
         """
-        SELECT c.id::text, ts_rank_cd(c.tsv, websearch_to_tsquery('english', :query)) AS score
+        SELECT c.id::text, ts_rank_cd(c.tsv, to_tsquery('english', :tsquery)) AS score
         FROM evidence_chunks c
-        WHERE c.tsv @@ websearch_to_tsquery('english', :query)
+        WHERE c.tsv @@ to_tsquery('english', :tsquery)
         ORDER BY score DESC
         LIMIT :limit
         """
     )
-    rows = session.execute(statement, {"query": query, "limit": limit}).fetchall()
+    rows = session.execute(statement, {"tsquery": tsquery, "limit": limit}).fetchall()
     return [(row[0], float(row[1] or 0.0)) for row in rows]
 
 
 def _dense_query(session: Any, query: str, embedding: Sequence[float], limit: int) -> list[tuple[str, float]]:
+    """Rank chunks by cosine similarity to the query embedding.
+
+    Two backends are supported. With pgvector installed the database does the
+    ranking with an ANN index. Without it, the vectors are fetched and ranked
+    in Python - which is adequate at the corpus sizes this platform targets,
+    and keeps the deployment working on a plain PostgreSQL server.
+    """
     statement = text(
         """
-        SELECT c.id::text, (c.embedding <=> CAST(:embedding AS vector)) AS distance
+        SELECT c.id::text, c.embedding
         FROM evidence_chunks c
         WHERE c.embedding IS NOT NULL
-        ORDER BY distance ASC
-        LIMIT :limit
+        LIMIT 5000
         """
     )
-    rows = session.execute(
-        statement, {"embedding": list(embedding), "limit": limit}
-    ).fetchall()
-    return [(row[0], float(row[1] or 0.0)) for row in rows]
+    rows = session.execute(statement).fetchall()
+
+    query_vector = list(embedding)
+    if not query_vector:
+        return []
+
+    scored: list[tuple[str, float]] = []
+    for row in rows:
+        stored = row[1]
+        if stored is None:
+            continue
+        if isinstance(stored, str):
+            try:
+                stored = json.loads(stored)
+            except json.JSONDecodeError:
+                continue
+        vector = list(stored)
+        if len(vector) != len(query_vector):
+            continue
+        similarity = _cosine(query_vector, vector)
+        scored.append((row[0], similarity))
+
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[:limit]
+
+
+def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
+    """Cosine similarity of two equal-length vectors."""
+    dot = 0.0
+    left_norm = 0.0
+    right_norm = 0.0
+    for a, b in zip(left, right):
+        dot += a * b
+        left_norm += a * a
+        right_norm += b * b
+    if left_norm <= 0 or right_norm <= 0:
+        return 0.0
+    return dot / ((left_norm**0.5) * (right_norm**0.5))
 
 
 def _load_chunks(session: Any, chunk_ids: Sequence[str]) -> dict[str, RetrievedChunk]:
@@ -101,13 +186,21 @@ def _load_chunks(session: Any, chunk_ids: Sequence[str]) -> dict[str, RetrievedC
         return {}
     statement = text(
         """
-        SELECT c.id::text, c.content, c.source_document_id::text, d.url, s.name,
-               d.trust_tier, d.last_success_at, c.section_path,
-               sc.cycle_label, sc.slug
+        SELECT c.id::text, c.content, c.source_document_id::text, d.url,
+               meta.scholarship_name, d.trust_tier, d.last_success_at, c.section_path,
+               meta.cycle_label, meta.slug
         FROM evidence_chunks c
         JOIN source_documents d ON d.id = c.source_document_id
-        LEFT JOIN source_snapshots s ON s.id = c.snapshot_id
-        LEFT JOIN scholarships sc ON sc.canonical_source_id = d.id
+        LEFT JOIN LATERAL (
+            SELECT s.name AS scholarship_name, s.slug,
+                   (SELECT c2.cycle_label FROM scholarship_cycles c2
+                     WHERE c2.scholarship_id = s.id
+                     ORDER BY c2.is_current DESC, c2.intake_year DESC LIMIT 1) AS cycle_label
+            FROM scholarships s
+            WHERE s.canonical_source_id = d.id
+            ORDER BY s.name
+            LIMIT 1
+        ) meta ON true
         WHERE c.id::text = ANY(:ids)
         """
     )
@@ -122,9 +215,9 @@ def _load_chunks(session: Any, chunk_ids: Sequence[str]) -> dict[str, RetrievedC
             source_title=row[4],
             trust_tier=row[5],
             checked_at=row[6].isoformat() if row[6] else None,
-            section_path=row[8],
-            cycle_label=row[9],
-            scholarship_slug=row[10],
+            section_path=row[7],
+            cycle_label=row[8],
+            scholarship_slug=row[9],
         )
     return chunks
 

@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects import postgresql
+
+try:  # pgvector is optional: the schema degrades to a float array without it.
+    from pgvector.sqlalchemy import Vector
+except Exception:  # pragma: no cover - depends on the environment
+    Vector = None  # type: ignore[assignment]
 
 revision = "0001_core"
 down_revision = None
@@ -17,8 +22,27 @@ branch_labels = None
 depends_on = None
 
 
+def _has_pgvector() -> bool:
+    """Whether the pgvector extension is available in this database.
+
+    pgvector is the preferred way to store and index embeddings, but it is not
+    always installed (a plain PostgreSQL server, a managed instance without the
+    extension). The schema degrades to a plain float array and the retrieval
+    layer computes cosine similarity in Python for corpora of this size. The
+    column type and the index differ; everything else behaves identically.
+    """
+    if Vector is None:
+        return False
+    row = op.get_bind().execute(
+        sa.text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+    ).fetchone()
+    return bool(row)
+
+
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    has_vector = _has_pgvector()
+    if has_vector:
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS citext")
 
     # --- vocabulary -------------------------------------------------------
@@ -34,7 +58,7 @@ def upgrade() -> None:
         sa.Column("code", sa.Text, primary_key=True),
         sa.Column("name", sa.Text, nullable=False),
         sa.Column("parent_code", sa.Text),
-        sa.Column("aliases", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("aliases", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.ForeignKeyConstraint(["parent_code"], ["fields_of_study.code"]),
     )
     op.create_table(
@@ -75,7 +99,7 @@ def upgrade() -> None:
         sa.Column("raw_content", sa.LargeBinary),
         sa.Column("extracted_text", sa.Text),
         sa.Column("http_status", sa.Integer),
-        sa.Column("headers", sa.JSONB, nullable=False, server_default="{}"),
+        sa.Column("headers", postgresql.JSONB, nullable=False, server_default="{}"),
         sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("extraction_version", sa.Text),
         sa.Column("fetched_by", sa.Text, nullable=False, server_default="scheduler"),
@@ -95,9 +119,9 @@ def upgrade() -> None:
         sa.Column("provider_name", sa.Text),
         sa.Column("provider_country_iso3", sa.CHAR(3)),
         sa.Column("description", sa.Text),
-        sa.Column("study_levels", sa.JSONB, nullable=False, server_default="[]"),
-        sa.Column("fields_of_study", sa.JSONB, nullable=False, server_default="[]"),
-        sa.Column("destinations", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("study_levels", postgresql.JSONB, nullable=False, server_default="[]"),
+        sa.Column("fields_of_study", postgresql.JSONB, nullable=False, server_default="[]"),
+        sa.Column("destinations", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("canonical_source_id", sa.dialects.postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("trust_tier", sa.Text, nullable=False, server_default="official_primary"),
         sa.Column("website_url", sa.Text),
@@ -142,10 +166,10 @@ def upgrade() -> None:
         sa.Column("kind", sa.Text, nullable=False),
         sa.Column("subject", sa.Text, nullable=False),
         sa.Column("operator", sa.Text, nullable=False),
-        sa.Column("value", sa.JSONB, nullable=False),
+        sa.Column("value", postgresql.JSONB, nullable=False),
         sa.Column("comparator", sa.Text, nullable=False, server_default="mandatory"),
         sa.Column("rule_text", sa.Text, nullable=False),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("source_snapshot_id", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("confidence", sa.Float, nullable=False, server_default="1.0"),
         sa.Column("ambiguity_flag", sa.Boolean, nullable=False, server_default=sa.false()),
@@ -167,7 +191,7 @@ def upgrade() -> None:
         sa.Column("currency", sa.CHAR(3)),
         sa.Column("amount_period", sa.Text),
         sa.Column("conditions", sa.Text),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("source_snapshot_id", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -183,8 +207,8 @@ def upgrade() -> None:
         sa.Column("is_mandatory", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("description", sa.Text),
         sa.Column("lead_time_days", sa.Integer),
-        sa.Column("evidence_ids", sa.JSONB, nullable=False, server_default="[]"),
-        sa.Column("country_scope", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("evidence_ids", postgresql.JSONB, nullable=False, server_default="[]"),
+        sa.Column("country_scope", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("requires_notarization", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("requires_apostille", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("requires_credential_evaluation", sa.Boolean, nullable=False, server_default=sa.false()),
@@ -207,21 +231,27 @@ def upgrade() -> None:
         sa.Column("char_end", sa.Integer, nullable=False),
         sa.Column("content", sa.Text, nullable=False),
         sa.Column("content_hash", sa.Text, nullable=False),
-        sa.Column("embedding", Vector(1536)),
+        sa.Column("embedding", Vector(1536) if has_vector else sa.ARRAY(sa.Float)),
         sa.Column("embedding_model", sa.Text),
         sa.Column("token_count", sa.Integer),
+        sa.Column(
+            "tsv",
+            postgresql.TSVECTOR,
+            sa.Computed("to_tsvector('english', content)", persisted=True),
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["snapshot_id"], ["source_snapshots.id"]),
         sa.ForeignKeyConstraint(["source_document_id"], ["source_documents.id"]),
     )
     op.execute(
         "CREATE INDEX ix_evidence_chunks_tsv ON evidence_chunks "
-        "USING gin (to_tsvector('english', content))"
+        "USING gin (tsv)"
     )
-    op.execute(
-        "CREATE INDEX ix_evidence_chunks_embedding ON evidence_chunks "
-        "USING hnsw (embedding vector_cosine_ops)"
-    )
+    if has_vector:
+        op.execute(
+            "CREATE INDEX ix_evidence_chunks_embedding ON evidence_chunks "
+            "USING hnsw (embedding vector_cosine_ops)"
+        )
     op.create_index("ix_evidence_chunks_source_document_id", "evidence_chunks", ["source_document_id"])
 
     op.create_table(
@@ -236,7 +266,7 @@ def upgrade() -> None:
         sa.Column("subject_entity", sa.Text),
         sa.Column("subject_id", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("field_name", sa.Text),
-        sa.Column("normalized_value", sa.JSONB),
+        sa.Column("normalized_value", postgresql.JSONB),
         sa.Column("validation_status", sa.Text, nullable=False, server_default="ambiguous"),
         sa.Column("confidence", sa.Float, nullable=False, server_default="0.0"),
         sa.Column("extraction_method", sa.Text, nullable=False, server_default="llm"),
@@ -259,8 +289,8 @@ def upgrade() -> None:
         sa.Column("new_snapshot_id", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("cycle_id", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("field_name", sa.Text, nullable=False),
-        sa.Column("old_value", sa.JSONB),
-        sa.Column("new_value", sa.JSONB),
+        sa.Column("old_value", postgresql.JSONB),
+        sa.Column("new_value", postgresql.JSONB),
         sa.Column("change_type", sa.Text, nullable=False),
         sa.Column("severity", sa.Text, nullable=False, server_default="informational"),
         sa.Column("detected_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -281,8 +311,8 @@ def upgrade() -> None:
         sa.Column("entity_type", sa.Text, nullable=False),
         sa.Column("entity_id", sa.dialects.postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("field_name", sa.Text, nullable=False),
-        sa.Column("value_a", sa.JSONB),
-        sa.Column("value_b", sa.JSONB),
+        sa.Column("value_a", postgresql.JSONB),
+        sa.Column("value_b", postgresql.JSONB),
         sa.Column("evidence_id_a", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("evidence_id_b", sa.dialects.postgresql.UUID(as_uuid=True)),
         sa.Column("source_document_id_a", sa.dialects.postgresql.UUID(as_uuid=True)),
@@ -319,7 +349,7 @@ def upgrade() -> None:
         sa.Column("predicted_close_date", sa.Date),
         sa.Column("method", sa.Text, nullable=False, server_default="median_day_of_year"),
         sa.Column("confidence", sa.Text, nullable=False, server_default="low"),
-        sa.Column("supporting_snapshot_ids", sa.JSONB, nullable=False, server_default="[]"),
+        sa.Column("supporting_snapshot_ids", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("is_estimate", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),

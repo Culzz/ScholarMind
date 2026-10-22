@@ -42,6 +42,7 @@ class SourceEntry:
     level: str = "masters"
     notes: str = ""
     requires_render: bool = False
+    parent_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +55,7 @@ class SourceEntry:
             "level": self.level,
             "notes": self.notes,
             "requires_render": self.requires_render,
+            "parent_url": self.parent_url,
         }
 
 

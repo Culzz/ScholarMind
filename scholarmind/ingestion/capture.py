@@ -110,6 +110,7 @@ class CaptureResult:
     signals: list[ScamSignal] = field(default_factory=list)
     captured_at: str = ""
     path: str | None = None
+    parent_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +125,7 @@ class CaptureResult:
             "signals": [signal.to_dict() for signal in self.signals],
             "captured_at": self.captured_at,
             "path": self.path,
+            "parent_url": self.parent_url,
         }
 
 
@@ -146,6 +148,7 @@ def capture_source(
         name=source.name,
         trust_tier=source.trust_tier,
         captured_at=datetime.now(timezone.utc).isoformat(),
+        parent_url=source.parent_url,
     )
 
     text, fetch = fetcher.fetch_text(source.url)
@@ -176,6 +179,7 @@ def capture_source(
                 "content_hash": fetch.content_hash,
                 "headers": fetch.headers,
                 "captured_at": result.captured_at,
+                "parent_url": source.parent_url,
                 "signals": [signal.to_dict() for signal in result.signals],
             },
             indent=2,
@@ -258,6 +262,7 @@ def capture_manifest(
                 scope=source.scope,
                 level=source.level,
                 notes=f"Discovered by following a link from {source.url}",
+                parent_url=source.url,
             )
             child_result = capture_source(child, output_dir=output_dir, fetcher=fetcher)
             results.append(child_result)

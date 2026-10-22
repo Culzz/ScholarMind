@@ -53,18 +53,18 @@ def hash_content(content: bytes) -> str:
 
 
 def _normalise_text(content: bytes) -> str:
-    """Best-effort text extraction for change detection and chunking."""
-    text = content.decode("utf-8", errors="replace")
-    if "<html" in text[:2000].lower() or "<!doctype html" in text[:2000].lower():
-        import re
+    """Best-effort text extraction for change detection and chunking.
 
-        text = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", text)
-        text = re.sub(r"(?s)<!--.*?-->", " ", text)
-        text = re.sub(r"(?s)<[^>]+>", " ", text)
-        text = re.sub(r"&nbsp;?", " ", text)
-        text = re.sub(r"&amp;", "&", text)
-        text = re.sub(r"[ \t\r\f\v]+", " ", text)
-        text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+    HTML is reduced to its readable content: navigation, footers, forms and
+    scripts are dropped, because they otherwise become the most common
+    sentences in the evidence index and crowd out the facts.
+    """
+    text = content.decode("utf-8", errors="replace")
+    lowered = text[:2000].lower()
+    if "<html" in lowered or "<!doctype html" in lowered or "<body" in lowered:
+        from scholarmind.ingestion.text import html_to_text
+
+        return html_to_text(text)
     return text.strip()
 
 
