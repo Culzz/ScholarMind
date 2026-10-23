@@ -112,16 +112,29 @@ def _lexical_query(session: Any, query: str, limit: int) -> list[tuple[str, floa
     tsquery = _build_tsquery(query)
     if not tsquery:
         return []
+
+    # Chunks matching every term are promoted: with an OR query a long page
+    # that repeats one common word can outrank a short page that answers the
+    # question.
+    and_query = tsquery.replace(" | ", " & ")
     statement = text(
         """
-        SELECT c.id::text, ts_rank_cd(c.tsv, to_tsquery('english', :tsquery)) AS score
-        FROM evidence_chunks c
-        WHERE c.tsv @@ to_tsquery('english', :tsquery)
+        WITH q AS (
+            SELECT to_tsquery('english', :tsquery) AS or_query,
+                   to_tsquery('english', :and_query) AS and_query
+        )
+        SELECT c.id::text,
+               ts_rank_cd(c.tsv, q.or_query)
+               + 2 * ts_rank_cd(c.tsv, q.and_query) AS score
+        FROM evidence_chunks c, q
+        WHERE c.tsv @@ q.or_query
         ORDER BY score DESC
         LIMIT :limit
         """
     )
-    rows = session.execute(statement, {"tsquery": tsquery, "limit": limit}).fetchall()
+    rows = session.execute(
+        statement, {"tsquery": tsquery, "and_query": and_query, "limit": limit}
+    ).fetchall()
     return [(row[0], float(row[1] or 0.0)) for row in rows]
 
 
@@ -222,6 +235,44 @@ def _load_chunks(session: Any, chunk_ids: Sequence[str]) -> dict[str, RetrievedC
     return chunks
 
 
+def _fingerprint(content: str) -> str:
+    """A cheap identity for near-identical passages."""
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "", content.lower())[:200]
+
+
+def _diversify(
+    chunks: Sequence[RetrievedChunk],
+    *,
+    top_k: int,
+    per_document: int,
+) -> list[RetrievedChunk]:
+    """Drop duplicate passages and cap how much of one page is returned.
+
+    Overlapping chunks of the same page otherwise fill the whole result, which
+    makes the evidence look better supported than it is and gives the reader
+    the same sentence three times.
+    """
+    chosen: list[RetrievedChunk] = []
+    seen: set[str] = set()
+    per_source: dict[str, int] = {}
+
+    for chunk in chunks:
+        fingerprint = _fingerprint(chunk.content)
+        if fingerprint and fingerprint in seen:
+            continue
+        used = per_source.get(chunk.source_document_id, 0)
+        if per_document > 0 and used >= per_document:
+            continue
+        seen.add(fingerprint)
+        per_source[chunk.source_document_id] = used + 1
+        chosen.append(chunk)
+        if len(chosen) >= top_k:
+            break
+    return chosen
+
+
 def retrieve(
     session: Any,
     query: str,
@@ -232,6 +283,7 @@ def retrieve(
     candidates: int = 100,
     rrf_k: int = 60,
     include_aggregators: bool = False,
+    per_document: int = 2,
 ) -> RetrievalResult:
     """Run a hybrid retrieval and return the fused, ordered chunks."""
     result = RetrievalResult(mode=mode, top_k=top_k, rrf_k=rrf_k)
@@ -250,13 +302,13 @@ def retrieve(
     if not rankings:
         return result
 
-    fused = reciprocal_rank_fusion(rankings, k=rrf_k)[:top_k]
+    fused = reciprocal_rank_fusion(rankings, k=rrf_k)[: max(top_k * 4, top_k)]
     chunk_map = _load_chunks(session, [item.chunk_id for item in fused])
 
     lexical_positions = {chunk_id: index for index, (chunk_id, _) in enumerate(lexical, 1)}
     dense_positions = {chunk_id: index for index, (chunk_id, _) in enumerate(dense, 1)}
 
-    chunks: list[RetrievedChunk] = []
+    ranked: list[RetrievedChunk] = []
     for item in fused:
         chunk = chunk_map.get(item.chunk_id)
         if chunk is None:
@@ -267,7 +319,11 @@ def retrieve(
         chunk.score = item.score
         chunk.lexical_rank = lexical_positions.get(item.chunk_id)
         chunk.dense_rank = dense_positions.get(item.chunk_id)
-        chunks.append(chunk)
+        ranked.append(chunk)
+
+    chunks = _diversify(ranked, top_k=top_k, per_document=per_document)
+    for position, chunk in enumerate(chunks, 1):
+        chunk.rank = position
 
     result.chunks = chunks
     return result

@@ -69,7 +69,6 @@ BLOCK_TAGS = frozenset(
         "tbody",
         "tfoot",
         "thead",
-        "tr",
         "ul",
     }
 )
@@ -79,6 +78,13 @@ BLOCK_TAGS = frozenset(
 # "Deadline" and "13 October 2026" on separate lines is not.
 CELL_TAGS = frozenset({"td", "th", "dt", "dd"})
 CELL_SEPARATOR = " - "
+
+# Table rows stay on one line as well: a header cell such as "Closing date"
+# describes every row below it, and splitting rows apart would leave each date
+# without the word that says what it is. Cells are separated by " - " and rows
+# by " | ".
+ROW_TAGS = frozenset({"tr"})
+ROW_SEPARATOR = " | "
 
 
 # A region smaller than this is treated as a fragment (a card, a teaser) rather
@@ -124,6 +130,8 @@ class _ContentExtractor(HTMLParser):
             self._article_depth += 1
         if tag in BLOCK_TAGS:
             self._emit("\n")
+        elif tag in ROW_TAGS:
+            self._emit(ROW_SEPARATOR)
         elif tag in CELL_TAGS:
             self._emit(CELL_SEPARATOR)
 
@@ -158,40 +166,31 @@ class _ContentExtractor(HTMLParser):
 
 
 def _tidy(parts: list[str]) -> str:
-    """Collapse whitespace while keeping paragraph breaks meaningful."""
+    """Collapse whitespace, one block of text per line."""
     text = "".join(parts)
     text = _WHITESPACE.sub(" ", text)
     text = _MANY_SEPARATORS.sub(CELL_SEPARATOR, text)
-    lines = [line.strip().strip(CELL_SEPARATOR).strip() for line in text.split("\n")]
+    lines = [line.strip().strip(CELL_SEPARATOR + "|").strip() for line in text.split("\n")]
+    lines = [line for line in lines if line]
 
     merged: list[str] = []
     for line in lines:
-        if (
-            merged
-            and merged[-1]
-            and _DATE_LINE.match(merged[-1])
-            and line
-            and not _DATE_LINE.match(line)
-        ):
+        if merged and _DATE_LINE.match(merged[-1]) and not _DATE_LINE.match(line):
             merged[-1] = f"{merged[-1]}{CELL_SEPARATOR}{line}"
-            continue
-        merged.append(line)
-
-    kept: list[str] = []
-    for line in merged:
-        if line:
-            kept.append(line)
-        elif kept and kept[-1] != "":
-            kept.append("")
-    return _MANY_NEWLINES.sub("\n\n", "\n".join(kept)).strip()
+        else:
+            merged.append(line)
+    return "\n".join(merged).strip()
 
 
 def html_to_text(html: str) -> str:
     """Extract the readable text of an HTML document.
 
-    ``main`` is preferred, then ``article``, then the whole body. Each region is
-    only used if it carries at least :data:`MIN_REGION_CHARS` characters, which
-    avoids treating a page's single card as its entire content.
+    The body is used after the chrome (navigation, header, footer, forms,
+    scripts) has been removed. ``main`` and ``article`` are only fallbacks: a
+    page can put a real fact outside its main region - a deadline banner in a
+    section below the content, for example - and dropping it would trade
+    removed noise for missing evidence. Each region is only used if it carries
+    at least :data:`MIN_REGION_CHARS` characters.
     """
     parser = _ContentExtractor()
     try:
@@ -200,10 +199,9 @@ def html_to_text(html: str) -> str:
     except Exception:  # pragma: no cover - HTMLParser is tolerant in practice
         pass
 
-    for parts in (parser.main, parser.article, parser.body):
+    for parts in (parser.body, parser.main, parser.article):
         candidate = _tidy(parts)
         if len(candidate) >= MIN_REGION_CHARS:
             return candidate
 
-    # Everything is short: the body is still the most complete answer.
     return _tidy(parser.body)
