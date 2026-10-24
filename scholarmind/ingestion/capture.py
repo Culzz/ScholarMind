@@ -191,6 +191,11 @@ def capture_source(
     return result
 
 
+def _url_key(url: str) -> str:
+    """Identity of a page for de-duplication (fragment and query dropped)."""
+    return url.split("#")[0].split("?")[0].rstrip("/").lower()
+
+
 def capture_manifest(
     manifest: Manifest,
     *,
@@ -198,46 +203,62 @@ def capture_manifest(
     limit: int | None = None,
     delay_seconds: int = 5,
     crawl_depth: int = 0,
+    fetcher_factory: Any = None,
 ) -> list[CaptureResult]:
     """Capture every source in a manifest.
 
     ``crawl_depth`` follows in-domain links that look fact-bearing (eligibility,
-    funding, application, deadline pages) up to that many pages per source. The
-    links stay on the same registrable domain and the courtesy delay applies to
-    every request.
+    funding, application, deadline pages), up to that many extra pages per
+    source. Each URL is captured at most once across the whole run: the same
+    page is often linked from several sources, and capturing it repeatedly
+    creates duplicate snapshots and splits one programme into several awards.
+    Every discovered page is recorded against the *root* source, so grouping
+    later does not depend on how deep the link was found.
     """
-    from app.core.http import build_http_client
+    from collections import deque
 
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[CaptureResult] = []
+    seen: set[str] = set()
 
     sources = list(manifest.sources)
     if limit:
         sources = sources[:limit]
 
     for source in sources:
+        if _url_key(source.url) in seen:
+            logger.info("skipping %s: already captured", source.url)
+            continue
+        seen.add(_url_key(source.url))
+
         policy = build_policy([source.url])
-        client = build_http_client(user_agent="ScholarMindBot/1.0")
+        if fetcher_factory is not None:
+            fetcher = fetcher_factory(source)
+        else:
+            from app.core.http import build_http_client
 
-        if source.requires_render:
-            from scholarmind.ingestion.browser import is_available, to_client
+            client = build_http_client(user_agent="ScholarMindBot/1.0")
 
-            if is_available():
-                client = to_client(source.url, user_agent="ScholarMindBot/1.0")
-                logger.info("rendering %s in a headless browser", source.url)
-            else:
-                logger.warning(
-                    "%s needs a rendered capture but no browser is available; "
-                    "the page will be recorded as not captured.",
-                    source.url,
-                )
+            if source.requires_render:
+                from scholarmind.ingestion.browser import is_available, to_client
 
-        fetcher = SafeFetcher(
-            policy,
-            user_agent="ScholarMindBot/1.0",
-            client=client,
-            min_delay_seconds=delay_seconds,
-        )
+                if is_available():
+                    client = to_client(source.url, user_agent="ScholarMindBot/1.0")
+                    logger.info("rendering %s in a headless browser", source.url)
+                else:
+                    logger.warning(
+                        "%s needs a rendered capture but no browser is available; "
+                        "the page will be recorded as not captured.",
+                        source.url,
+                    )
+
+            fetcher = SafeFetcher(
+                policy,
+                user_agent="ScholarMindBot/1.0",
+                client=client,
+                min_delay_seconds=delay_seconds,
+            )
+
         result = capture_source(source, output_dir=output_dir, fetcher=fetcher)
         results.append(result)
         logger.info(
@@ -250,27 +271,44 @@ def capture_manifest(
         if not (result.ok and crawl_depth > 0):
             continue
 
-        folder = Path(result.path or "")
-        html = (folder / "page.html").read_text(encoding="utf-8", errors="replace")
-        for link in _relevant_links(html, result.url)[:crawl_depth]:
-            child = SourceEntry(
-                url=link,
-                name=f"{source.name} — {link.rsplit('/', 1)[-1][:48]}",
-                provider_type=source.provider_type,
-                trust_tier=source.trust_tier,
-                cadence_hours=source.cadence_hours,
-                scope=source.scope,
-                level=source.level,
-                notes=f"Discovered by following a link from {source.url}",
-                parent_url=source.url,
-            )
-            child_result = capture_source(child, output_dir=output_dir, fetcher=fetcher)
-            results.append(child_result)
-            logger.info(
-                "  %s %s",
-                "captured" if child_result.ok else "failed",
-                link,
-            )
+        # Breadth-first over the source's own pages, newest links last.
+        queue: deque[tuple[str, str]] = deque([(source.url, result.path or "")])
+        discovered = 0
+        while queue and discovered < crawl_depth:
+            page_url, page_path = queue.popleft()
+            if not page_path:
+                continue
+            html = (Path(page_path) / "page.html").read_text(encoding="utf-8", errors="replace")
+
+            for link in _relevant_links(html, page_url):
+                if discovered >= crawl_depth:
+                    break
+                key = _url_key(link)
+                if key in seen:
+                    continue
+                seen.add(key)
+                discovered += 1
+
+                child = SourceEntry(
+                    url=link,
+                    name=f"{source.name} — {link.rsplit('/', 1)[-1][:48]}",
+                    provider_type=source.provider_type,
+                    trust_tier=source.trust_tier,
+                    cadence_hours=source.cadence_hours,
+                    scope=source.scope,
+                    level=source.level,
+                    notes=f"Discovered by following a link from {source.url}",
+                    parent_url=source.url,
+                )
+                child_result = capture_source(child, output_dir=output_dir, fetcher=fetcher)
+                results.append(child_result)
+                logger.info(
+                    "  %s %s",
+                    "captured" if child_result.ok else "failed",
+                    link,
+                )
+                if child_result.ok and child_result.path:
+                    queue.append((child_result.url, child_result.path))
     return results
 
 

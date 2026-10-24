@@ -79,6 +79,48 @@ def detect_intake_years(text: str, *, default_year: int | None = None) -> list[i
     return years
 
 
+# A page usually carries several dates: applications open, applications close,
+# interviews, offers. Only the application deadline is the cycle deadline, so a
+# date is scored by the words around it rather than by its position.
+_APPLICATION_WORDS = ("application", "apply", "applying")
+_OTHER_EVENT_WORDS = (
+    "offer",
+    "interview",
+    "decision",
+    "outcome",
+    "visa",
+    "document",
+    "reference",
+    "recommendation",
+    "english language",
+    "deposit",
+    "registration",
+    "arrival",
+)
+
+
+def _deadline_score(fact: Fact) -> int:
+    """How strongly a date sentence looks like the application deadline."""
+    text = (fact.text or "").lower()
+    score = 0
+    if any(word in text for word in _APPLICATION_WORDS):
+        score += 2
+    if any(word in text for word in _OTHER_EVENT_WORDS):
+        score -= 2
+    return score
+
+
+def _select_deadline(deadlines: Sequence[Fact]) -> Fact:
+    """The best application-deadline candidate, earliest date on a tie."""
+    return sorted(
+        deadlines,
+        key=lambda fact: (
+            -_deadline_score(fact),
+            str((fact.normalized_value or {}).get("value") or "9999-12-31"),
+        ),
+    )[0]
+
+
 def build_cycles(
     facts: Sequence[Fact],
     *,
@@ -103,10 +145,10 @@ def build_cycles(
     cycle = NormalisedCycle(intake_year=primary_year)
 
     if deadlines:
-        fact = deadlines[0]
+        fact = _select_deadline(deadlines)
         normalised = fact.normalized_value or {}
         cycle.deadline_at = _as_date(normalised.get("value"))
-        cycle.deadline_raw_text = fact.text
+        cycle.deadline_raw_text = normalised.get("raw_text") or fact.text
         cycle.deadline_precision = normalised.get("precision", "unknown")
         cycle.deadline_timezone = normalised.get("timezone")
         cycle.source_fact_indexes.append(facts.index(fact))
