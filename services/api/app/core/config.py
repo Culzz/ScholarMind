@@ -48,7 +48,6 @@ class Settings(BaseSettings):
     jwt_refresh_secret: str = "change-me-too"
     jwt_access_minutes: int = 15
     jwt_refresh_days: int = 7
-    admin_emails: list[str] = Field(default_factory=list)
 
     # --- LLM ---
     llm_api_key: str = ""
@@ -78,6 +77,7 @@ class Settings(BaseSettings):
     ingestion_default_cadence_hours: int = 168
 
     # --- Rate limits ---
+    rate_limit_auth_per_min: int = 10
     rate_limit_read_per_min: int = 240
     rate_limit_write_per_min: int = 60
     rate_limit_assistant_per_min: int = 20
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # --- Observability ---
     sentry_dsn: str = ""
 
-    @field_validator("cors_origins", "admin_emails", mode="before")
+    @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
         """Allow comma-separated values in environment variables."""

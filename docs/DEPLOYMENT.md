@@ -81,7 +81,6 @@ See `.env.example` for the full list with defaults. Critical ones:
 | `LLM_MODEL` / `EMBEDDING_MODEL` | Pinned model ids | no |
 | `CORS_ORIGINS` | Allowed frontend origins | no |
 | `JWT_SECRET` / `JWT_REFRESH_SECRET` | Token signing | yes |
-| `ADMIN_EMAILS` | Bootstrap admin accounts | no |
 | `INGESTION_ENABLED` | Master switch for scheduled fetching | no |
 | `SENTRY_DSN` | Error tracking | yes |
 | `LOG_LEVEL` | Logging verbosity | no |
