@@ -13,11 +13,13 @@ Usage
 
 Behaviour
 ---------
-* No results file: the gate prints a "no results" message and exits ``0``. A
-  repository without a committed baseline is not a failing repository.
-* A metric that is not present in the results file is reported as
-  "not reported" and does not fail the gate; only a measured value can
-  regress.
+* No results file, an empty file, or a payload without metrics: the gate
+  **fails** (exit ``2``). A gate that passes when it measured nothing reports
+  safety it does not have.
+* Results produced by the plumbing stub, or explicitly marked
+  ``measurement_valid: false``: the gate fails.
+* A gated metric that is missing from a valid results file fails the gate: a
+  missing number is not a passing number.
 * A regression is a measured value on the wrong side of its threshold. The
   gate does not apply bootstrap confidence intervals; a run whose interval
   straddles the threshold should be reviewed by a human (docs/EVALUATION.md
@@ -208,13 +210,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         results_path = latest_results_file(Path(args.results_root))
 
     if results_path is None:
-        print("no results found: nothing to gate (no experiment results under research/experiments)")
-        return 0
+        print(
+            "no results found: the gate needs at least one measured run under "
+            "research/experiments. A missing baseline is a failure, not a pass.",
+            file=sys.stderr,
+        )
+        return 2
 
     payload = load_json(results_path)
     if not payload:
-        print(f"no results found: {results_path} is empty or unreadable")
-        return 0
+        print(f"no results found: {results_path} is empty or unreadable", file=sys.stderr)
+        return 2
+
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    system_id = str(payload.get("system_id") or config.get("system") or "")
+    if payload.get("measurement_valid") is False or config.get("measurement_valid") is False:
+        print(
+            f"invalid results: {results_path} was marked as not a measurement "
+            "(plumbing smoke test or unverified items).",
+            file=sys.stderr,
+        )
+        return 2
+    if "stub" in system_id.lower():
+        print(
+            f"invalid results: {results_path} was produced by the '{system_id}' "
+            "stub, which echoes the gold evidence. It cannot gate a system.",
+            file=sys.stderr,
+        )
+        return 2
+
+    metrics_payload = payload.get("metrics")
+    if not isinstance(metrics_payload, dict) or not metrics_payload:
+        print(f"no metrics in {results_path}", file=sys.stderr)
+        return 2
+    if int(metrics_payload.get("count") or 0) <= 0:
+        print(f"no measured items in {results_path}", file=sys.stderr)
+        return 2
 
     split = thresholds_doc.get("split")
     recorded_split = payload.get("split")
@@ -235,7 +266,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"| {metric} | n/a | n/a | not configured |")
             continue
         if value is None:
-            print(f"| {metric} | n/a | {threshold} | not reported |")
+            print(f"| {metric} | n/a | {threshold} | MISSING |")
+            failures.append(f"{metric}: not reported in {results_path.name}")
             continue
         passed = check_metric(value, direction, threshold)
         status = "pass" if passed else "FAIL"

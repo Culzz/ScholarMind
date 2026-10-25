@@ -114,11 +114,29 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, default=20, help="maximum number of items")
     parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help=(
+            "run the plumbing smoke test only; the results are explicitly marked "
+            "as not a valid measurement and the CI gate refuses them"
+        ),
+    )
+    parser.add_argument(
         "--output-root",
         default=None,
         help="directory the experiment tree is written to (default research/experiments)",
     )
     return parser.parse_args(argv)
+
+
+def _items_with_gold_evidence(items: Sequence[core.EvalItem]) -> list[core.EvalItem]:
+    """Items whose required evidence has a real evidence or chunk id."""
+    return [
+        item
+        for item in items
+        if item.required_evidence
+        and all(entry.get("id") or entry.get("chunk_id") for entry in item.required_evidence)
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -140,8 +158,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"no items for split '{args.split}' in {dataset_path}", file=sys.stderr)
         return 2
 
-    results = [lexical_stub(item) for item in items]
+    gold_items = _items_with_gold_evidence(items)
+    if not gold_items and not args.smoke:
+        print(
+            f"refusing to measure: none of the {len(items)} item(s) in split "
+            f"'{args.split}' name a gold evidence chunk, so recall cannot be "
+            "computed. Label the items first, or run with --smoke for the "
+            "plumbing check (the output is marked as not a measurement).",
+            file=sys.stderr,
+        )
+        return 2
+
+    results = [lexical_stub(item) for item in (gold_items or items)]
     metrics = core.compute_metrics(results)
+    valid = bool(gold_items)
 
     output_root = Path(args.output_root) if args.output_root else core.EVAL_DIR / "research" / "experiments"
     results_path = core.write_results(
@@ -155,6 +185,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "system": SYSTEM_ID,
             "limit": args.limit,
             "offline": True,
+            "measurement_valid": valid,
+            "smoke": bool(args.smoke and not valid),
         },
         model_id=MODEL_ID,
         embedding_model=EMBEDDING_MODEL,
@@ -165,6 +197,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     table = markdown_table(metrics)
     print(table)
     print()
+    if not valid:
+        print(
+            "warning: this run used the lexical plumbing stub over unverified "
+            "items; the numbers are not a system measurement and the CI gate "
+            "will reject them."
+        )
     print(f"results: {results_path}")
     return 0
 
