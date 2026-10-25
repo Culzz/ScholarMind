@@ -71,16 +71,20 @@ def reciprocal_rank_fusion(
     return [RankedItem(chunk_id=chunk_id, rank=index, score=score) for index, (chunk_id, score) in enumerate(ordered, start=1)]
 
 
-def chunk_text(text: str, *, max_tokens: int = 500, overlap: int = 80) -> list[str]:
-    """Split text into overlapping chunks.
+@dataclass(frozen=True)
+class TextChunk:
+    """A chunk with its position in the source text."""
 
-    A lightweight whitespace/character approximation is used here on purpose: the
-    production chunker tokenises with the provider tokenizer, but the *shape* of the
-    behaviour (overlap preserved, headings kept with their section) is what the
-    retrieval experiments depend on, and this version stays dependency-free.
+    start: int
+    end: int
+    text: str
 
-    Character budget is derived from the token budget using a conservative average
-    of roughly four characters per token.
+
+def chunk_spans(text: str, *, max_tokens: int = 500, overlap: int = 80) -> list[TextChunk]:
+    """Split text into overlapping chunks and keep their character spans.
+
+    The span is the evidence anchor: ``text[chunk.start:chunk.end] == chunk.text``
+    must hold, otherwise a citation cannot be checked against the snapshot.
     """
     if max_tokens <= 0:
         raise ValueError("max_tokens must be positive")
@@ -92,7 +96,7 @@ def chunk_text(text: str, *, max_tokens: int = 500, overlap: int = 80) -> list[s
     if not text.strip():
         return []
 
-    chunks: list[str] = []
+    chunks: list[TextChunk] = []
     start = 0
     length = len(text)
     while start < length:
@@ -105,13 +109,35 @@ def chunk_text(text: str, *, max_tokens: int = 500, overlap: int = 80) -> list[s
             )
             if boundary != -1:
                 end = boundary + 1
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        raw = text[start:end]
+        stripped = raw.strip()
+        if stripped:
+            leading = len(raw) - len(raw.lstrip())
+            chunk_start = start + leading
+            chunks.append(TextChunk(start=chunk_start, end=chunk_start + len(stripped), text=stripped))
         if end >= length:
             break
         start = max(end - char_overlap, start + 1)
+        # Do not begin a chunk inside a word: a quoted passage that starts
+        # mid-word ("stion A.11") reads as corrupted evidence.
+        while start < length and start > 0 and text[start - 1].isalnum() and text[start].isalnum():
+            start += 1
     return chunks
+
+
+def chunk_text(text: str, *, max_tokens: int = 500, overlap: int = 80) -> list[str]:
+    """Split text into overlapping chunks.
+
+    A lightweight whitespace/character approximation is used here on purpose: the
+    production chunker tokenises with the provider tokenizer, but the *shape* of the
+    behaviour (overlap preserved, headings kept with their section) is what the
+    retrieval experiments depend on, and this version stays dependency-free.
+
+    Character budget is derived from the token budget using a conservative average
+    of roughly four characters per token.
+    """
+    return [chunk.text for chunk in chunk_spans(text, max_tokens=max_tokens, overlap=overlap)]
+
 
 
 def build_citation_map(

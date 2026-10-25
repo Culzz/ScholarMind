@@ -32,7 +32,7 @@ from scholarmind.extraction.extract import extract_all
 from scholarmind.extraction.validate import validate_result
 from scholarmind.ingestion.manifest import Manifest, load_manifest
 from scholarmind.normalization.cycles import build_cycles, choose_current_cycles
-from scholarmind.retrieval.fusion import chunk_text
+from scholarmind.retrieval.fusion import chunk_spans
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ class BuildStats:
     rules: int = 0
     funding: int = 0
     documents: int = 0
+    skipped_unsupported: int = 0
     warnings: list[str] = field(default_factory=list)
     vocabulary: dict[str, int] = field(default_factory=dict)
 
@@ -72,6 +73,7 @@ class BuildStats:
             "rules": self.rules,
             "funding": self.funding,
             "documents": self.documents,
+            "skipped_unsupported": self.skipped_unsupported,
             "warnings": list(self.warnings),
             "vocabulary": dict(self.vocabulary),
         }
@@ -82,10 +84,26 @@ def _slugify(value: str) -> str:
     return slug[:80] or "scholarship"
 
 
-def _group_key(entry: dict[str, Any]) -> str:
-    """Group key for a capture: parent pages and their children belong together."""
+def _group_key(entry: dict[str, Any], by_url: dict[str, Any] | None = None) -> str:
+    """Group key for a capture: parent pages and their children belong together.
+
+    A manifest root can name an explicit ``group`` when several official pages
+    describe one programme (a funder's main page, its country page and its
+    funding page). Without that, a crawled child belongs to its root, and a root
+    belongs to itself.
+    """
+    source = (by_url or {}).get(entry["url"])
+    explicit = getattr(source, "group", None) or entry.get("group")
+    if explicit:
+        return f"group:{explicit}"
     parent = entry.get("parent_url")
-    return parent or entry["url"]
+    if parent:
+        parent_source = (by_url or {}).get(parent)
+        parent_group = getattr(parent_source, "group", None)
+        if parent_group:
+            return f"group:{parent_group}"
+        return parent
+    return entry["url"]
 
 
 def _is_distinct_programme(entry: dict[str, Any], group: list[dict[str, Any]]) -> bool:
@@ -129,7 +147,7 @@ def build_corpus(
 
     groups: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:
-        groups.setdefault(_group_key(entry), []).append(entry)
+        groups.setdefault(_group_key(entry, by_url), []).append(entry)
 
     for group_key, group in groups.items():
         primary = next((entry for entry in group if not entry.get("parent_url")), None)
@@ -150,7 +168,21 @@ def build_corpus(
             if not entry.get("ok"):
                 continue
             folder = Path(entry["path"])
-            page_text = (folder / "page.txt").read_text(encoding="utf-8")
+            page_path = folder / "page.txt"
+            if not page_path.exists():
+                stats.skipped_unsupported += 1
+                continue
+            page_text = page_path.read_text(encoding="utf-8").replace("\x00", "")
+            if page_text.lstrip().startswith("%PDF"):
+                # Captured before PDFs were refused. There is no PDF extractor,
+                # so this is not evidence; skip it instead of indexing binary.
+                stats.skipped_unsupported += 1
+                stats.warnings.append(f"unsupported PDF capture skipped: {entry.get('url')}")
+                continue
+            if not page_text.strip():
+                stats.skipped_unsupported += 1
+                stats.warnings.append(f"empty capture: {entry.get('url')}")
+                continue
             source_document_id = _upsert_source_document(session, text, entry, source, stats)
             snapshot_id = _insert_snapshot(session, text, entry, source_document_id, page_text, stats)
 
@@ -301,33 +333,34 @@ def _index_chunks(
     chunk_overlap: int,
     stats: BuildStats,
 ) -> None:
-    chunks = chunk_text(page_text, max_tokens=chunk_tokens, overlap=chunk_overlap)
+    chunks = chunk_spans(page_text, max_tokens=chunk_tokens, overlap=chunk_overlap)
     for chunk in chunks:
-        content_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-        session.execute(
+        content_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+        result = session.execute(
             text(
                 """
                 INSERT INTO evidence_chunks
                     (id, snapshot_id, source_document_id, char_start, char_end, content, content_hash, token_count)
-                VALUES (gen_random_uuid(), :snapshot_id, :source_id, 0, :length, :content, :hash, :tokens)
-                ON CONFLICT DO NOTHING
+                VALUES (gen_random_uuid(), :snapshot_id, :source_id, :start, :end, :content, :hash, :tokens)
+                ON CONFLICT (snapshot_id, content_hash) DO NOTHING
                 """
             ),
             {
                 "snapshot_id": snapshot_id,
                 "source_id": source_document_id,
-                "length": len(chunk),
-                "content": chunk,
+                "start": chunk.start,
+                "end": chunk.end,
+                "content": chunk.text,
                 "hash": content_hash,
-                "tokens": len(chunk) // 4,
+                "tokens": len(chunk.text) // 4,
             },
         )
-        stats.chunks += 1
+        stats.chunks += result.rowcount or 0
 
 
 def _insert_claims(session: Any, text: Any, snapshot_id: str, validated: Any, stats: BuildStats) -> None:
     for fact in validated.facts:
-        session.execute(
+        result = session.execute(
             text(
                 """
                 INSERT INTO evidence_claims
@@ -336,6 +369,7 @@ def _insert_claims(session: Any, text: Any, snapshot_id: str, validated: Any, st
                 VALUES (gen_random_uuid(), :snapshot_id, :span_start, :span_end, :claim_text,
                         :claim_type, :field_name, CAST(:value AS jsonb), :status, :confidence,
                         :extraction_method)
+                ON CONFLICT (snapshot_id, claim_type, span_start, span_end) DO NOTHING
                 """
             ),
             {
@@ -351,7 +385,7 @@ def _insert_claims(session: Any, text: Any, snapshot_id: str, validated: Any, st
                 "extraction_method": fact.extraction_method,
             },
         )
-        stats.claims += 1
+        stats.claims += result.rowcount or 0
 
 
 def _insert_structured_facts(
@@ -389,12 +423,28 @@ def _insert_structured_facts(
             VALUES (gen_random_uuid(), :scholarship_id, :year, :label, :opens_at, :opens_precision,
                     :deadline, :timezone, :raw_text, :precision, :status, 'confirmed', :is_current)
             ON CONFLICT (scholarship_id, intake_year) DO UPDATE
-                SET deadline_at = EXCLUDED.deadline_at,
-                    deadline_raw_text = EXCLUDED.deadline_raw_text,
-                    deadline_precision = EXCLUDED.deadline_precision,
-                    opens_at = EXCLUDED.opens_at,
-                    status = EXCLUDED.status,
-                    is_current = EXCLUDED.is_current,
+                SET deadline_at = COALESCE(EXCLUDED.deadline_at, scholarship_cycles.deadline_at),
+                    deadline_raw_text = COALESCE(
+                        EXCLUDED.deadline_raw_text, scholarship_cycles.deadline_raw_text
+                    ),
+                    deadline_precision = CASE
+                        WHEN EXCLUDED.deadline_at IS NOT NULL THEN EXCLUDED.deadline_precision
+                        ELSE scholarship_cycles.deadline_precision
+                    END,
+                    deadline_timezone = COALESCE(
+                        EXCLUDED.deadline_timezone, scholarship_cycles.deadline_timezone
+                    ),
+                    opens_at = COALESCE(EXCLUDED.opens_at, scholarship_cycles.opens_at),
+                    opens_at_precision = COALESCE(
+                        EXCLUDED.opens_at_precision, scholarship_cycles.opens_at_precision
+                    ),
+                    status = CASE
+                        WHEN EXCLUDED.deadline_at IS NULL
+                             AND scholarship_cycles.deadline_at IS NOT NULL
+                        THEN scholarship_cycles.status
+                        ELSE EXCLUDED.status
+                    END,
+                    is_current = scholarship_cycles.is_current OR EXCLUDED.is_current,
                     updated_at = now()
             RETURNING id::text
             """

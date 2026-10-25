@@ -103,6 +103,7 @@ sources:
   - url: https://www.chevening.org/scholarships
     name: Chevening Scholarships
     provider_type: government
+    group: chevening
     scope: []
     level: masters
     cadence_hours: 24
@@ -115,6 +116,7 @@ sources:
   - url: https://www.chevening.org/scholarship/nigeria
     name: Chevening in Nigeria
     provider_type: government
+    group: chevening
     scope: [NGA]
     cadence_hours: 24
     notes: Country-specific page for Nigerian applicants (eligibility and cycle status).
@@ -122,6 +124,7 @@ sources:
   - url: https://www.chevening.org/scholarships/who-can-apply
     name: Chevening — who can apply
     provider_type: government
+    group: chevening
     scope: []
     cadence_hours: 24
     notes: The eligibility criteria page. This is where the rules live.
@@ -129,6 +132,7 @@ sources:
   - url: https://www.chevening.org/scholarships/application-timeline
     name: Chevening — application timeline
     provider_type: government
+    group: chevening
     scope: []
     cadence_hours: 24
     notes: The opening and closing dates for the cycle.
@@ -136,6 +140,7 @@ sources:
   - url: https://www.chevening.org/scholarships/funding
     name: Chevening — funding
     provider_type: government
+    group: chevening
     scope: []
     cadence_hours: 24
     notes: What the award actually covers, component by component.

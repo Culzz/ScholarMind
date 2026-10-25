@@ -39,9 +39,6 @@ DEADLINE_HINTS = (
     "submit your application by",
     "last date",
     "applications must be submitted",
-    "applications open",
-    "opening date",
-    "applications are open",
 )
 
 FUNDING_HINTS = (
@@ -245,7 +242,14 @@ def extract_deadlines(text: str) -> list[Fact]:
 
         for date_start, date_end, value in occurrences:
             preceding = [kind for position, kind in hints if position <= date_start]
-            kind = preceding[-1] if preceding else hints[0][1]
+            if preceding:
+                kind = preceding[-1]
+            else:
+                # Table rows and timelines put the label after the date
+                # ("1 April 2026 - Applications open"). Use the next hint
+                # rather than defaulting to the first one on the line.
+                following = [kind for position, kind in hints if position >= date_start]
+                kind = following[0] if following else hints[0][1]
 
             precision = "exact"
             if re.match(r"^[A-Za-z]+$", sentence[date_start:date_end].strip()) or len(sentence[date_start:date_end].strip()) <= 4:

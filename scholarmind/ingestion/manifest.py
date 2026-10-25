@@ -43,6 +43,7 @@ class SourceEntry:
     notes: str = ""
     requires_render: bool = False
     parent_url: str | None = None
+    group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +57,7 @@ class SourceEntry:
             "notes": self.notes,
             "requires_render": self.requires_render,
             "parent_url": self.parent_url,
+            "group": self.group,
         }
 
 
@@ -128,6 +130,7 @@ def load_manifest(path: str | Path) -> Manifest:
                 level=item.get("level", defaults.get("level", "masters")),
                 notes=item.get("notes", ""),
                 requires_render=bool(item.get("requires_render", False)),
+                group=item.get("group"),
             )
         )
 

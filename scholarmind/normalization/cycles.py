@@ -110,10 +110,19 @@ def _deadline_score(fact: Fact) -> int:
     return score
 
 
-def _select_deadline(deadlines: Sequence[Fact]) -> Fact:
-    """The best application-deadline candidate, earliest date on a tie."""
+def _select_deadline(deadlines: Sequence[Fact]) -> Fact | None:
+    """The best application-deadline candidate, or ``None`` if none qualifies.
+
+    A date whose only surrounding words describe a different event ("Offer
+    deadline", "Interview date") is not an application deadline. Falling back
+    to it because no other candidate exists turns an offer date into the date a
+    student plans around, so the cycle keeps an unknown deadline instead.
+    """
+    candidates = [fact for fact in deadlines if _deadline_score(fact) >= 0]
+    if not candidates:
+        return None
     return sorted(
-        deadlines,
+        candidates,
         key=lambda fact: (
             -_deadline_score(fact),
             str((fact.normalized_value or {}).get("value") or "9999-12-31"),
@@ -146,12 +155,18 @@ def build_cycles(
 
     if deadlines:
         fact = _select_deadline(deadlines)
-        normalised = fact.normalized_value or {}
-        cycle.deadline_at = _as_date(normalised.get("value"))
-        cycle.deadline_raw_text = normalised.get("raw_text") or fact.text
-        cycle.deadline_precision = normalised.get("precision", "unknown")
-        cycle.deadline_timezone = normalised.get("timezone")
-        cycle.source_fact_indexes.append(facts.index(fact))
+        if fact is not None:
+            normalised = fact.normalized_value or {}
+            cycle.deadline_at = _as_date(normalised.get("value"))
+            cycle.deadline_raw_text = normalised.get("raw_text") or fact.text
+            cycle.deadline_precision = normalised.get("precision", "unknown")
+            cycle.deadline_timezone = normalised.get("timezone")
+            cycle.source_fact_indexes.append(facts.index(fact))
+        else:
+            cycle.notes = (
+                "Dates were found, but none describes the application deadline; "
+                "the deadline stays unknown."
+            )
 
     if openings:
         fact = openings[0]

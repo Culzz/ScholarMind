@@ -79,7 +79,7 @@ def fetch_snapshot(self: Any, url: str, trust_tier: str = "official_primary") ->
     fetcher = SafeFetcher(
         policy,
         user_agent=_user_agent(),
-        client=build_http_client(user_agent=_user_agent()),
+        client=build_http_client(policy, user_agent=_user_agent()),
     )
     text, result = fetcher.fetch_text(url)
 
@@ -114,7 +114,12 @@ def fetch_snapshot(self: Any, url: str, trust_tier: str = "official_primary") ->
 
 @celery_app.task(name="scholarmind.staleness_sweep")
 def staleness_sweep() -> dict[str, Any]:
-    """Mark sources that have not been checked within their cadence as stale."""
+    """Mark sources that have not been checked within their cadence as stale.
+
+    The sweep only changes ``freshness_state``. ``fetch_status`` records the
+    outcome of the last attempt, and overwriting it here made a reachable page
+    look like a failed fetch.
+    """
     from sqlalchemy import text
 
     from app.db.session import get_engine
@@ -123,11 +128,12 @@ def staleness_sweep() -> dict[str, Any]:
     statement = text(
         """
         UPDATE source_documents
-        SET fetch_status = 'stale',
+        SET freshness_state = 'stale',
             updated_at = now()
         WHERE is_enabled = true
           AND last_success_at IS NOT NULL
           AND last_success_at < now() - (refresh_cadence_hours * interval '1 hour') * 2
+          AND freshness_state <> 'stale'
         RETURNING id
         """
     )
@@ -192,13 +198,10 @@ def _load_last_checked() -> dict[str, Any]:
 
     from app.db.session import get_engine
 
-    try:
-        with get_engine().connect() as connection:
-            rows = connection.execute(
-                text("SELECT url, last_success_at FROM source_documents")
-            ).fetchall()
-    except Exception:  # database unavailable during local development
-        return {}
+    with get_engine().connect() as connection:
+        rows = connection.execute(
+            text("SELECT url, last_success_at FROM source_documents")
+        ).fetchall()
     return {row.url: row.last_success_at for row in rows if row.last_success_at}
 
 
@@ -260,21 +263,20 @@ def _record_fetch_success(url: str, when: datetime) -> None:
 
     from app.db.session import get_engine
 
-    try:
-        with get_engine().begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    UPDATE source_documents
-                    SET last_checked_at = :when, last_success_at = :when, fetch_status = 'ok',
-                        fetch_error = NULL, consecutive_failures = 0, updated_at = now()
-                    WHERE url = :url
-                    """
-                ),
-                {"url": url, "when": when},
-            )
-    except Exception as exc:  # pragma: no cover - best effort bookkeeping
-        logger.warning("could not record fetch success for %s: %s", url, exc)
+    with get_engine().begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE source_documents
+                SET last_checked_at = :when, last_success_at = :when,
+                    last_attempt_at = :when, freshness_state = 'fresh',
+                    fetch_status = 'ok', fetch_error = NULL,
+                    consecutive_failures = 0, updated_at = now()
+                WHERE url = :url
+                """
+            ),
+            {"url": url, "when": when},
+        )
 
 
 def _record_fetch_failure(url: str, error: str | None) -> None:
@@ -282,21 +284,21 @@ def _record_fetch_failure(url: str, error: str | None) -> None:
 
     from app.db.session import get_engine
 
-    try:
-        with get_engine().begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    UPDATE source_documents
-                    SET last_checked_at = now(), fetch_status = 'error', fetch_error = :error,
-                        consecutive_failures = consecutive_failures + 1, updated_at = now()
-                    WHERE url = :url
-                    """
-                ),
-                {"url": url, "error": error},
-            )
-    except Exception as exc:  # pragma: no cover
-        logger.warning("could not record fetch failure for %s: %s", url, exc)
+    with get_engine().begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE source_documents
+                SET last_checked_at = now(), last_attempt_at = now(),
+                    freshness_state = 'failed',
+                    fetch_status = 'error', fetch_error = :error,
+                    consecutive_failures = consecutive_failures + 1,
+                    updated_at = now()
+                WHERE url = :url
+                """
+            ),
+            {"url": url, "error": error},
+        )
 
 
 def _store_scam_signals(source_document_id: str, signals: list[Any]) -> None:
@@ -306,28 +308,30 @@ def _store_scam_signals(source_document_id: str, signals: list[Any]) -> None:
 
     from app.db.session import get_engine
 
-    try:
-        with get_engine().begin() as connection:
-            for signal in signals:
-                connection.execute(
-                    text(
-                        """
-                        INSERT INTO scam_signals
-                            (id, source_document_id, signal_type, severity, detail, detection_method, status)
-                        VALUES (gen_random_uuid(), :source_document_id, :signal_type, :severity,
-                                :detail, :detection_method, 'open')
-                        """
-                    ),
-                    {
-                        "source_document_id": source_document_id,
-                        "signal_type": signal.signal_type,
-                        "severity": signal.severity,
-                        "detail": signal.detail,
-                        "detection_method": signal.detection_method,
-                    },
-                )
-    except Exception as exc:  # pragma: no cover
-        logger.warning("could not store scam signals: %s", exc)
+    with get_engine().begin() as connection:
+        # Re-running the task must not multiply the signals.
+        connection.execute(
+            text("DELETE FROM scam_signals WHERE source_document_id::text = :id"),
+            {"id": source_document_id},
+        )
+        for signal in signals:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO scam_signals
+                        (id, source_document_id, signal_type, severity, detail, detection_method, status)
+                    VALUES (gen_random_uuid(), :source_document_id, :signal_type, :severity,
+                            :detail, :detection_method, 'open')
+                    """
+                ),
+                {
+                    "source_document_id": source_document_id,
+                    "signal_type": signal.signal_type,
+                    "severity": signal.severity,
+                    "detail": signal.detail,
+                    "detection_method": signal.detection_method,
+                },
+            )
 
 
 def _source_url(source_document_id: Any) -> str | None:
@@ -335,14 +339,11 @@ def _source_url(source_document_id: Any) -> str | None:
 
     from app.db.session import get_engine
 
-    try:
-        with get_engine().connect() as connection:
-            row = connection.execute(
-                text("SELECT url FROM source_documents WHERE id = :id"),
-                {"id": str(source_document_id)},
-            ).first()
-    except Exception:  # pragma: no cover
-        return None
+    with get_engine().connect() as connection:
+        row = connection.execute(
+            text("SELECT url FROM source_documents WHERE id = :id"),
+            {"id": str(source_document_id)},
+        ).first()
     return row[0] if row else None
 
 
