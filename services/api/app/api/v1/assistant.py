@@ -72,10 +72,16 @@ def _embedding_provider() -> Any:
 
 def _freshness_warnings(chunks: list[RetrievedChunk]) -> list[str]:
     warnings: list[str] = []
-    stale = [chunk for chunk in chunks if chunk.trust_tier == "stale"]
+    stale = [chunk for chunk in chunks if chunk.freshness_state == "stale"]
     if stale:
         warnings.append(
             "Some cited pages have not been verified recently; their content may be out of date."
+        )
+    unreachable = [chunk for chunk in chunks if chunk.freshness_state == "failed"]
+    if unreachable:
+        warnings.append(
+            "Some cited pages could not be re-checked on the last attempt; "
+            "the text shown is from an earlier capture."
         )
     aggregator = [chunk for chunk in chunks if chunk.trust_tier == "aggregator"]
     if aggregator:
@@ -121,6 +127,9 @@ async def ask(
             missing_information=["a source page covering this scholarship"],
             retrieval={
                 "mode": retrieval.mode,
+                "mode_used": retrieval.mode_used,
+                "degraded_reason": retrieval.degraded_reason,
+                "embedding_available": retrieval.embedding_available,
                 "top_k": retrieval.top_k,
                 "lexical_hits": retrieval.lexical_count,
                 "dense_hits": retrieval.dense_count,
@@ -221,6 +230,9 @@ async def ask(
         evidence=[chunk.to_excerpt() for chunk in retrieval.chunks],
         retrieval={
             "mode": retrieval.mode,
+            "mode_used": retrieval.mode_used,
+            "degraded_reason": retrieval.degraded_reason,
+            "embedding_available": retrieval.embedding_available,
             "top_k": retrieval.top_k,
             "rrf_k": retrieval.rrf_k,
             "lexical_hits": retrieval.lexical_count,

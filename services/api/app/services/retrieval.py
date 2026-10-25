@@ -32,6 +32,8 @@ class RetrievedChunk:
     source_title: str | None = None
     trust_tier: str | None = None
     checked_at: str | None = None
+    freshness_state: str | None = None
+    last_attempt_at: str | None = None
     cycle_label: str | None = None
     scholarship_slug: str | None = None
     section_path: str | None = None
@@ -47,6 +49,8 @@ class RetrievedChunk:
             "source_url": self.source_url or "",
             "source_title": self.source_title or "",
             "checked_at": self.checked_at or "",
+            "last_attempt_at": self.last_attempt_at or "",
+            "freshness_state": self.freshness_state or "",
             "trust_tier": self.trust_tier or "",
             "cycle_label": self.cycle_label or "",
         }
@@ -54,10 +58,19 @@ class RetrievedChunk:
 
 @dataclass
 class RetrievalResult:
-    """The outcome of one retrieval."""
+    """The outcome of one retrieval.
+
+    ``mode`` is what the caller asked for and ``mode_used`` is what actually
+    ran. They differ whenever the query could not be embedded or the dense list
+    came back empty; reporting the request as if it were the execution made a
+    lexical-only search look hybrid.
+    """
 
     chunks: list[RetrievedChunk] = field(default_factory=list)
     mode: str = "hybrid"
+    mode_used: str = "lexical"
+    degraded_reason: str | None = None
+    embedding_available: bool = False
     top_k: int = 20
     rrf_k: int = 60
     lexical_count: int = 0
@@ -161,18 +174,24 @@ def _dense_query(session: Any, query: str, embedding: Sequence[float], limit: in
         return []
 
     scored: list[tuple[str, float]] = []
+    expected_dimension = len(query_vector)
     for row in rows:
         stored = row[1]
         if stored is None:
             continue
         if isinstance(stored, str):
-            try:
-                stored = json.loads(stored)
-            except json.JSONDecodeError:
-                continue
+            stored = json.loads(stored)
         vector = list(stored)
-        if len(vector) != len(query_vector):
-            continue
+        if len(vector) != expected_dimension:
+            # A chunk embedded by a different model cannot be compared with
+            # this query. Skipping it silently produced a short list that was
+            # then reported as a successful dense search.
+            raise ValueError(
+                "dense retrieval dimension mismatch: the query vector has "
+                f"{expected_dimension} dimensions but chunk {row[0]} has "
+                f"{len(vector)}. Re-embed the corpus or use the configured "
+                "embedding model."
+            )
         similarity = _cosine(query_vector, vector)
         scored.append((row[0], similarity))
 
@@ -201,7 +220,7 @@ def _load_chunks(session: Any, chunk_ids: Sequence[str]) -> dict[str, RetrievedC
         """
         SELECT c.id::text, c.content, c.source_document_id::text, d.url,
                meta.scholarship_name, d.trust_tier, d.last_success_at, c.section_path,
-               meta.cycle_label, meta.slug
+               meta.cycle_label, meta.slug, d.freshness_state, d.last_attempt_at
         FROM evidence_chunks c
         JOIN source_documents d ON d.id = c.source_document_id
         LEFT JOIN LATERAL (
@@ -231,6 +250,8 @@ def _load_chunks(session: Any, chunk_ids: Sequence[str]) -> dict[str, RetrievedC
             section_path=row[7],
             cycle_label=row[8],
             scholarship_slug=row[9],
+            freshness_state=row[10],
+            last_attempt_at=row[11].isoformat() if row[11] else None,
         )
     return chunks
 
@@ -285,13 +306,37 @@ def retrieve(
     include_aggregators: bool = False,
     per_document: int = 2,
 ) -> RetrievalResult:
-    """Run a hybrid retrieval and return the fused, ordered chunks."""
+    """Run a retrieval and return the fused, ordered chunks.
+
+    ``mode_used`` records what actually ran. A missing query embedding or an
+    empty dense list degrades to lexical search and says so; it never reports
+    ``hybrid`` for a lexical run.
+    """
     result = RetrievalResult(mode=mode, top_k=top_k, rrf_k=rrf_k)
 
+    wants_dense = mode in ("dense", "hybrid")
+    result.embedding_available = bool(embedding)
+
+    if wants_dense and not embedding:
+        if mode == "dense":
+            result.mode_used = "unavailable"
+            result.degraded_reason = "no_query_embedding"
+            return result
+        result.mode_used = "lexical_fallback"
+        result.degraded_reason = "no_query_embedding"
+
     lexical = _lexical_query(session, query, candidates) if mode in ("lexical", "hybrid") else []
-    dense = _dense_query(session, query, embedding, candidates) if mode in ("dense", "hybrid") and embedding else []
+    dense = _dense_query(session, query, embedding, candidates) if wants_dense and embedding else []
     result.lexical_count = len(lexical)
     result.dense_count = len(dense)
+    if result.mode_used == "lexical" and mode == "hybrid":
+        if dense:
+            result.mode_used = "hybrid"
+        else:
+            result.mode_used = "lexical_fallback"
+            result.degraded_reason = "dense_returned_no_vectors"
+    elif mode == "dense" and embedding and not dense:
+        result.mode_used = "dense"
 
     rankings: list[Sequence[RankedItem]] = []
     if lexical:

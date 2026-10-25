@@ -93,7 +93,8 @@ async def list_scholarships(
                    d.last_checked_at, d.fetch_status,
                    c.id::text AS cycle_id, c.intake_year, c.cycle_label, c.deadline_at,
                    c.deadline_raw_text, c.deadline_precision, c.status AS cycle_status,
-                   c.status_confidence, c.opens_at
+                   c.status_confidence, c.opens_at,
+                   d.freshness_state, d.last_attempt_at
             FROM scholarships s
             JOIN source_documents d ON d.id = s.canonical_source_id
             LEFT JOIN scholarship_cycles c ON c.scholarship_id = s.id AND c.is_current = true
@@ -127,6 +128,8 @@ async def list_scholarships(
             "source_last_checked_at": row[12].isoformat() if row[12] else None,
             "source_last_success_at": row[13].isoformat() if row[13] else None,
             "source_fetch_status": row[14],
+            "source_freshness_state": row[24],
+            "source_last_attempt_at": row[25].isoformat() if row[25] else None,
             "cycle": (
                 {
                     "id": row[15],
@@ -165,7 +168,7 @@ async def scholarship_detail(scholarship_id: str, session: Session = Depends(get
                    s.provider_country_iso3, s.description, s.study_levels, s.fields_of_study,
                    s.destinations, s.trust_tier, s.website_url, s.status,
                    d.id::text, d.url, d.trust_tier, d.last_checked_at, d.last_success_at,
-                   d.fetch_status, d.refresh_cadence_hours
+                   d.fetch_status, d.refresh_cadence_hours, d.freshness_state, d.last_attempt_at
             FROM scholarships s
             JOIN source_documents d ON d.id = s.canonical_source_id
             WHERE s.id::text = :id OR s.slug = :id
@@ -254,6 +257,8 @@ async def scholarship_detail(scholarship_id: str, session: Session = Depends(get
             "last_success_at": row[17].isoformat() if row[17] else None,
             "fetch_status": row[18],
             "refresh_cadence_hours": row[19],
+            "freshness_state": row[20],
+            "last_attempt_at": row[21].isoformat() if row[21] else None,
         },
         "cycles": [
             {
