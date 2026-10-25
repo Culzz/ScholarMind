@@ -60,6 +60,9 @@ def _normalise_text(content: bytes) -> str:
     sentences in the evidence index and crowd out the facts.
     """
     text = content.decode("utf-8", errors="replace")
+    # PostgreSQL text fields reject NUL bytes, and a decoded binary body can
+    # contain them. Strip them here so a page never fails to persist later.
+    text = text.replace("\x00", "")
     lowered = text[:2000].lower()
     if "<html" in lowered or "<!doctype html" in lowered or "<body" in lowered:
         from scholarmind.ingestion.text import html_to_text
@@ -95,9 +98,15 @@ class SafeFetcher:
 
     def _get_client(self) -> Any:
         if self._client is None:
-            raise RuntimeError(
-                "SafeFetcher requires an injected HTTP client "
-                "(see services/api/app/core/http.py:build_http_client)."
+            # Safe by default: the pinned client validates the host and connects
+            # to the validated address instead of resolving the name again.
+            from scholarmind.ingestion.pinned_client import PinnedHTTPClient
+
+            self._client = PinnedHTTPClient(
+                self.policy,
+                user_agent=self.user_agent,
+                timeout_seconds=self.timeout_seconds,
+                max_bytes=self.max_bytes,
             )
         return self._client
 

@@ -9,7 +9,9 @@ fetch a manifest-provided URL without opening the internal network:
    CGNAT, and cloud metadata ranges are rejected).
 3. The same checks are re-applied after every redirect.
 4. Only http/https, a restricted port set, and a small set of content types are
-   allowed; the response body is size-capped.
+   allowed; the response body is size-capped. PDFs are not accepted: there is no
+   PDF text extractor yet, so storing a decoded PDF as evidence would put
+   unreadable bytes behind a citation.
 """
 
 from __future__ import annotations
@@ -20,12 +22,14 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 ALLOWED_SCHEMES = {"http", "https"}
-ALLOWED_PORTS = {80, 443, 8080, 8443}
+# Only the two standard web ports. Alternate ports were allowed before, which
+# widened the SSRF surface (an internal service on 8443 was reachable through a
+# public hostname) without serving any manifest source.
+ALLOWED_PORTS = {80, 443}
 ALLOWED_CONTENT_TYPES = (
     "text/html",
     "application/xhtml+xml",
     "text/plain",
-    "application/pdf",
 )
 
 BLOCKED_HOSTNAMES = {

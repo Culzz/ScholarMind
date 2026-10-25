@@ -73,7 +73,9 @@ def test_absolute_redirect_to_blocked_host_is_rejected() -> None:
 
 def test_content_type_allowlist() -> None:
     assert content_type_allowed("text/html; charset=utf-8", POLICY)
-    assert content_type_allowed("application/pdf", POLICY)
+    # No PDF text extractor exists yet, so a PDF cannot become checkable
+    # evidence; accepting it only stored unreadable bytes behind a citation.
+    assert not content_type_allowed("application/pdf", POLICY)
     assert not content_type_allowed("application/octet-stream", POLICY)
     assert not content_type_allowed("text/html", SafetyPolicy(allowed_hosts=frozenset({"a.com"}), allowed_content_types=()))
 

@@ -237,7 +237,7 @@ def capture_manifest(
         else:
             from app.core.http import build_http_client
 
-            client = build_http_client(user_agent="ScholarMindBot/1.0")
+            client = build_http_client(policy, user_agent="ScholarMindBot/1.0")
 
             if source.requires_render:
                 from scholarmind.ingestion.browser import is_available, to_client
