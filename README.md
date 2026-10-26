@@ -29,42 +29,47 @@ pages — not fixtures.
 
 | Area | State |
 |---|---|
-| Schema | 40 tables across 4 Alembic migrations; `pgvector` is optional (float-array fallback), `tsvector` column + GIN index for lexical search |
-| Corpus | 33 allowlisted sources captured (90 pages on disk); 76 source documents, 34 scholarships, 25 cycles, 392 evidence chunks, 23 confirmed claims, 50 funding components, 9 required documents |
-| Retrieval | Lexical search with query-term coverage boosting + RRF fusion + per-document diversity cap; aggregator-tier pages never returned as evidence |
+| Schema | 41 tables across 5 Alembic migrations; `pgvector` is optional (float-array fallback), `tsvector` column + GIN index for lexical search |
+| Corpus | 99 allowlisted sources, 72 captured snapshots: 27 scholarships, 18 cycles (5 with a deadline), 320 evidence chunks, 11 confirmed claims, 36 funding components, 8 required documents, 0 eligibility rules |
+| Retrieval | Lexical search with query-term coverage boosting + RRF fusion + per-document diversity cap; `mode_used` names a lexical fallback; aggregator-tier pages never returned as evidence |
+| Auth | Short-lived JWTs; refresh tokens stored as hashes in Postgres with family rotation and replay revocation; `SameSite=Lax` + Origin allow-list; per-client rate limits; admins only via `python -m app.cli create-admin` |
 | API | Catalogue, detail, history, evidence, eligibility evaluate/explain/unlock/questions, assistant, compare, recommendations, planner + exports, change feed, auth, admin, health |
 | Core | Framework-free package: ingestion, text extraction, extraction, normalization, eligibility, retrieval, generation + verification, freshness, planning, readiness, vault, reporting |
-| Tests | 215 passing (`pytest tests -q`), including property-based invariants and core-purity checks |
+| Tests | 261 passing (`pytest tests -q`), including property-based invariants, core-purity checks, and database-backed auth/rotation tests |
 | Frontend | React + TypeScript + Vite + Tailwind scaffold (57 files): discovery, detail, eligibility, compare, planner, assistant |
-| Evaluation | Offline harness, ScholarBench-Africa (98 items), adversarial suite, CI regression gate — **no metrics published yet** |
+| Evaluation | Offline harness, ScholarBench-Africa (98 unverified template items), CI regression gate that fails without a valid run — **no metrics published yet** |
 
 ### Verified in this checkout
 
 ```bash
-pytest tests -q                                   # 215 passed
+pytest tests -q                                   # 261 passed
 python scripts/smoke_api.py                       # live API against the populated database
-python scripts/smoke_retrieval.py                 # real lexical retrieval over 392 chunks
+python scripts/smoke_retrieval.py                 # real lexical retrieval over 320 chunks
+python scripts/rebuild_corpus.py --yes            # clean rebuild from data/raw
 python scripts/compare_extraction.py              # extraction quality: old vs. new text pipeline
 ```
 
-`scripts/smoke_api.py` currently reports: health and readiness OK, 34 scholarships listed,
+`scripts/smoke_api.py` currently reports: health and readiness OK, 27 scholarships listed,
 detail + evidence served, eligibility evaluated, and the assistant abstaining with zero citations
 when no model is configured (the intended behaviour).
 
+`docs/STATUS.md` is the finding-by-finding ledger for the Phase 1 trust/security review.
+
 ### Not done yet
 
-- **Chevening eligibility pages are JS-rendered.** Playwright is not installed, so four of them are
-  not captured; a plain fetch yields zero occurrences of "eligible" on the page. The render adapter
-  (`scholarmind/ingestion/browser.py`) exists and is wired in, but is untested against the real site.
-- **Crawl grouping is imperfect.** Child pages are captured more than once (the same URL can arrive
-  under two different parents) and grandchildren are keyed under the intermediate page, so a few
-  programmes appear as several scholarships (Chevening currently yields six rows instead of one).
-- **Only 1 eligibility rule is stored.** The rule extractor covers nationality lists; work
-  experience, residency and English-score rules are extracted as claims, not yet promoted to rules.
-- **Deadline attribution needs care.** "Offer deadline" on a Chevening page is currently stored as
-  the application deadline; section context is not yet used to qualify a date.
-- **No measured evaluation numbers.** `docs/MODEL_CARD.md` metrics stay as placeholders until the
-  harness runs against this corpus.
+- **No eligibility rules on the real corpus.** The rule extractor covers nationality lists in
+  fixtures, but no captured page yields a promotable rule yet, so every real scholarship reports
+  `unknown` requirements.
+- **Chevening eligibility pages are JS-rendered.** Playwright is not installed, so those pages
+  are captured as navigation only; the deadline is genuinely absent and stays `unknown` rather
+  than being guessed.
+- **Deadline attribution is heuristic.** Offer and interview dates are rejected, but a page that
+  lists several programmes' dates resolves to the first qualifying closing date.
+- **PDF pages are not ingested.** The fetcher refuses `application/pdf` because no extractor
+  exists; a captured PDF is skipped instead of indexed as binary.
+- **Rate limiting is in-process**, so a multi-instance deployment needs Redis counters.
+- **No measured evaluation numbers.** The benchmark items are unverified templates without gold
+  evidence ids; the runner refuses them and the gate fails when there is no valid run.
 - **Some sources are unreachable** (DNS/timeout/403): Oxford, Cambridge, Edinburgh, Commonwealth
   (partial), SETU/SETD, AKU, UNILAG, Fulbright.
 
@@ -122,14 +127,22 @@ python -m scholarmind.ingestion.capture --manifest data/manifests/nigeria_v1.yam
 # 2. Re-extract page text from the stored HTML (no network) after improving the extractor
 python scripts/renormalize_captures.py --captures data/raw
 
-# 3. Load into PostgreSQL (idempotent)
+# 3. Load into PostgreSQL (clean rebuild; --yes deletes the previous corpus and
+#    scholarship-linked student rows, then imports the capture)
 DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:55432/scholarmind \
-  python -m services.api.app.services.corpus_builder \
-  --manifest data/manifests/nigeria_v1.yaml --captures data/raw
+  PYTHONPATH=".;services/api" python scripts/rebuild_corpus.py --yes --captures data/raw
 ```
 
 The builder records provenance for every fact: source document, snapshot hash, character span, and
-check timestamp. Claims that fail span validation are stored as ambiguous, never confirmed.
+check timestamp. Claims that fail span validation are stored as ambiguous, never confirmed. Chunk,
+claim and snapshot inserts carry unique keys, so re-running a build or a task does not duplicate
+evidence.
+
+Administrators are provisioned out-of-band, never through registration:
+
+```bash
+PYTHONPATH=".;services/api" python -m app.cli create-admin --email ops@example.org
+```
 
 See `docs/CORPUS_CAPTURE.md` for what the real sources actually return, including the JS-rendering
 finding.
@@ -141,9 +154,12 @@ python -m research.evaluation.harness.runner --experiment A --split dev \
   --dataset data/fixtures/eval/dev.jsonl
 ```
 
-Results are written to `research/experiments/<exp_id>/<timestamp>/results.json` with the dataset
-version, split, config, model ids and code commit — every published number must come from one of
-these files. See `docs/EVALUATION.md` for the full protocol.
+The runner refuses items without gold evidence ids, because a run over unlabelled templates cannot
+measure recall. `--smoke` exercises the plumbing and marks the output `measurement_valid: false`;
+the CI gate rejects it, along with missing, empty or stub results. Results are written to
+`research/experiments/<exp_id>/<timestamp>/results.json` with the dataset version, split, config,
+model ids and code commit — every published number must come from one of these files. See
+`docs/EVALUATION.md` for the full protocol.
 
 ## Documentation
 

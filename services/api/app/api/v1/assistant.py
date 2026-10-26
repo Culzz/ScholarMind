@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.llm import parse_json_response
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 from app.schemas.assistant import AssistantAnswerResponse, AssistantAskRequest, ClaimResponse, ConflictResponse
 from services.api.app.services.retrieval import RetrievedChunk, retrieve
@@ -91,7 +92,14 @@ def _freshness_warnings(chunks: list[RetrievedChunk]) -> list[str]:
     return warnings
 
 
-@router.post("/ask", response_model=AssistantAnswerResponse)
+@router.post(
+    "/ask",
+    response_model=AssistantAnswerResponse,
+    dependencies=[
+        Depends(rate_limit("assistant_minute", setting="rate_limit_assistant_per_min")),
+        Depends(rate_limit("assistant_day", setting="rate_limit_assistant_per_day", window_seconds=86400)),
+    ],
+)
 async def ask(
     payload: AssistantAskRequest,
     session: Session = Depends(get_db),

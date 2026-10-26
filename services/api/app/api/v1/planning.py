@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.errors import ApiError, NotFoundError
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 from scholarmind.planning.export import plan_to_ics, plan_to_markdown, shortlist_to_csv
 from scholarmind.planning.plan import RequiredDocument, generate_plan
@@ -50,7 +51,7 @@ class PlanRequest(BaseModel):
     lead_time_overrides: dict[str, int] = Field(default_factory=dict)
 
 
-@router.post("/compare")
+@router.post("/compare", dependencies=[Depends(rate_limit("planning_write", setting="rate_limit_write_per_min"))])
 async def compare(payload: CompareRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Compare scholarships including rule-level verdicts, funding and freshness."""
     rows = session.execute(
@@ -240,7 +241,7 @@ async def recommendations(
     }
 
 
-@router.post("/applications/plan")
+@router.post("/applications/plan", dependencies=[Depends(rate_limit("planning_write", setting="rate_limit_write_per_min"))])
 async def build_plan(payload: PlanRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Generate an application plan for a cycle."""
     row = session.execute(

@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 
 router = APIRouter(prefix="/eligibility", tags=["eligibility"])
@@ -151,7 +152,7 @@ def _profile_from_session(session: Session, profile: dict[str, Any]) -> dict[str
     return {key: value for key, value in merged.items() if value not in (None, [], "")}
 
 
-@router.post("/evaluate")
+@router.post("/evaluate", dependencies=[Depends(rate_limit("eligibility_write", setting="rate_limit_write_per_min"))])
 async def evaluate(payload: EvaluateRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Evaluate a profile against the rules of the selected cycles."""
     from scholarmind.eligibility.engine import EligibilityEngine, summarize
@@ -181,7 +182,7 @@ async def evaluate(payload: EvaluateRequest, session: Session = Depends(get_db))
     }
 
 
-@router.post("/explain")
+@router.post("/explain", dependencies=[Depends(rate_limit("eligibility_write", setting="rate_limit_write_per_min"))])
 async def explain(payload: ExplainRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Explain a stored assessment rule by rule."""
     rows = session.execute(
@@ -223,7 +224,7 @@ async def explain(payload: ExplainRequest, session: Session = Depends(get_db)) -
     }
 
 
-@router.post("/unlock")
+@router.post("/unlock", dependencies=[Depends(rate_limit("eligibility_write", setting="rate_limit_write_per_min"))])
 async def unlock(payload: UnlockRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Rank the profile changes that unlock the most opportunities."""
     from scholarmind.eligibility.engine import EligibilityEngine
@@ -264,7 +265,7 @@ async def unlock(payload: UnlockRequest, session: Session = Depends(get_db)) -> 
     }
 
 
-@router.post("/questions")
+@router.post("/questions", dependencies=[Depends(rate_limit("eligibility_write", setting="rate_limit_write_per_min"))])
 async def questions(payload: QuestionsRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     """Rank the profile questions by the number of unknowns they would resolve."""
     from scholarmind.eligibility.engine import EligibilityEngine
