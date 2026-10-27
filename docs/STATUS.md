@@ -4,9 +4,32 @@ This page is the honest ledger for the fifteen findings in the review brief. A f
 `fixed` when the behaviour is implemented, covered by a test, and exercised against the local
 Postgres corpus. "Verified" means it was run in this checkout, not that it is deployed.
 
-Counts below come from `scripts/rebuild_corpus.py --yes` over the capture in `data/raw/`
-(72 snapshots) and from `pytest tests` (261 tests). They are measurements of this checkout,
-not claims about production.
+The propose-then-review rule pipeline is now in place. Neither the LLM nor the regex extractor
+may decide eligibility: the LLM drafts structured rule candidates (`drafted_by='llm'`), the regex
+extractor drafts its own (`drafted_by='regex'`), and **only candidates a reviewer approves reach
+the eligibility engine**, written with `authored_by='human'`.
+
+The mechanism, with tests:
+
+- `scholarmind/extraction/rule_drafter.py` — prompt builder + mechanical validator. A candidate is
+  rejected unless its quote exists in the source text (the span is located by the validator, never
+  produced by the model), and every claimed value literally appears inside that quote, and the
+  kind/subject/operator match what the engine can evaluate.
+- Table `rule_candidates` (migration `0006_rule_queue`) — status `proposed → approved/rejected`,
+  drafted_by, model_id, reviewer fields, unique key so the same claim is not queued twice.
+- `/admin/rule-candidates` (GET list, POST `{id}/approve` with optional edits, POST `{id}/reject`),
+  admin-only; approval re-validates (including reviewer edits) and refuses invalid candidates with
+  the validator's reasons. See `tests/api/test_rule_review.py`.
+- CLI: `python -m app.cli draft-rules [--limit N] [--dry-run]` runs the LLM pass (refuses to run
+  without `LLM_API_KEY`), and `review-rules --list | --approve ID | --reject ID` for review.
+- The corpus builder routes regex-extracted eligibility facts into the queue instead of writing
+  rules; shape problems (e.g. the extractor's `language` kind) are stored as `validation_notes`
+  for the reviewer instead of silently dropping the candidate.
+
+**The real corpus currently queues 0 candidates** — the regex extractor finds nothing promotable
+on the captured pages, and the LLM pass needs an API key (not yet configured). The next corpus
+(the expanded 100+-opportunity set) is where this pipeline pays off, because every rule approved
+in review becomes a labelled gold item for the eval harness as a by-product.
 
 ## Findings
 
@@ -42,26 +65,34 @@ Also fixed while in this area (not in the fifteen):
 
 ## Corpus after a clean rebuild
 
+Values verified against the database after `scripts/rebuild_corpus.py --yes` over the capture in
+`data/raw/` (2026-10-26), not from build counters:
+
 | Metric | Value |
 |---|---|
-| Manifest sources | 99 |
+| Manifest sources | 99 (72 source documents linked to a scholarship) |
 | Snapshots imported | 72 |
 | Scholarships | 27 |
-| Cycles | 18 (5 with a deadline) |
+| Cycles | 18 (4 with a deadline) |
 | Evidence chunks | 320 |
 | Confirmed claims | 11 |
 | Funding components | 36 |
 | Required documents | 8 |
-| Eligibility rules | **0** |
+| Approved eligibility rules | **0** |
+| Rule candidates in the queue | 0 |
+
+`pytest tests` passes 284 tests in this checkout (74.7 s warm).
 
 The claim count is lower than the previous build (23) because earlier counters incremented per
 attempt rather than per inserted row; 11 is the number of rows a reader can actually cite.
 
 ## Known gaps
 
-- **Eligibility rules are empty on the real corpus.** The extractor finds nationality rules in
-  fixtures, but no captured page yields a promotable rule. The eligibility engine is therefore
-  exercised only by tests, and every real scholarship reports `unknown` requirements.
+- **The rule queue is empty on the real corpus.** The propose-then-review pipeline is wired and
+  tested, but the regex extractor finds no promotable candidates on the captured pages and the LLM
+  pass needs an API key that is not configured yet. Every real scholarship therefore reports
+  `unknown` requirements, honestly. Expanding the corpus and running the LLM drafter with human
+  review is the next work item, and approvals build the gold set for measuring rule extraction.
 - **Chevening eligibility pages are JS-rendered.** Playwright is not installed, so those pages
   are captured as navigation only; the deadline is genuinely absent and is reported as unknown.
 - **Rate limiting is in-process** and keyed by client address. A multi-instance deployment needs
@@ -82,5 +113,12 @@ $env:PYTHONPATH='.;services/api'
 python -m alembic upgrade head
 python scripts/rebuild_corpus.py --yes
 python -m pytest tests -q
+python scripts/smoke_retrieval.py
+
+# the rule draft/review loop (needs LLM_API_KEY for drafting):
+python -m app.cli draft-rules --dry-run       # report without writing
+python -m app.cli draft-rules --limit 40
+python -m app.cli review-rules --list
+python -m app.cli review-rules --approve <candidate_id> --note "checks out on the page"
 python scripts/smoke_retrieval.py
 ```

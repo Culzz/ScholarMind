@@ -29,24 +29,31 @@ pages — not fixtures.
 
 | Area | State |
 |---|---|
-| Schema | 41 tables across 5 Alembic migrations; `pgvector` is optional (float-array fallback), `tsvector` column + GIN index for lexical search |
-| Corpus | 99 allowlisted sources, 72 captured snapshots: 27 scholarships, 18 cycles (5 with a deadline), 320 evidence chunks, 11 confirmed claims, 36 funding components, 8 required documents, 0 eligibility rules |
+| Schema | 42 tables across 6 Alembic migrations; `pgvector` is optional (float-array fallback), `tsvector` column + GIN index for lexical search |
+| Corpus | 99 allowlisted sources, 72 captured snapshots: 27 scholarships, 18 cycles (4 with a deadline), 320 evidence chunks, 11 confirmed claims, 36 funding components, 8 required documents, 0 eligibility rules in the engine |
+| Rule pipeline | propose-then-review: LLM and regex drafters propose candidates into a queue; a mechanical validator rejects spans/values that don't match the source; only rules a human approves (`authored_by='human'`) run in the eligibility engine |
 | Retrieval | Lexical search with query-term coverage boosting + RRF fusion + per-document diversity cap; `mode_used` names a lexical fallback; aggregator-tier pages never returned as evidence |
 | Auth | Short-lived JWTs; refresh tokens stored as hashes in Postgres with family rotation and replay revocation; `SameSite=Lax` + Origin allow-list; per-client rate limits; admins only via `python -m app.cli create-admin` |
 | API | Catalogue, detail, history, evidence, eligibility evaluate/explain/unlock/questions, assistant, compare, recommendations, planner + exports, change feed, auth, admin, health |
 | Core | Framework-free package: ingestion, text extraction, extraction, normalization, eligibility, retrieval, generation + verification, freshness, planning, readiness, vault, reporting |
-| Tests | 261 passing (`pytest tests -q`), including property-based invariants, core-purity checks, and database-backed auth/rotation tests |
+| Tests | 284 passing (`pytest tests -q`), including property-based invariants, core-purity checks, and database-backed auth/rotation and rule-queue tests |
 | Frontend | React + TypeScript + Vite + Tailwind scaffold (57 files): discovery, detail, eligibility, compare, planner, assistant |
 | Evaluation | Offline harness, ScholarBench-Africa (98 unverified template items), CI regression gate that fails without a valid run — **no metrics published yet** |
 
 ### Verified in this checkout
 
 ```bash
-pytest tests -q                                   # 261 passed
+pytest tests -q                                   # 284 passed
 python scripts/smoke_api.py                       # live API against the populated database
 python scripts/smoke_retrieval.py                 # real lexical retrieval over 320 chunks
 python scripts/rebuild_corpus.py --yes            # clean rebuild from data/raw
 python scripts/compare_extraction.py              # extraction quality: old vs. new text pipeline
+
+# draft + review eligibility rules (drafting needs LLM_API_KEY):
+python -m app.cli draft-rules --dry-run            # report without writing
+python -m app.cli draft-rules                       # propose candidates into the queue
+python -m app.cli review-rules --list
+python -m app.cli review-rules --approve <id>       # validation runs again at approval
 ```
 
 `scripts/smoke_api.py` currently reports: health and readiness OK, 27 scholarships listed,
@@ -57,9 +64,12 @@ when no model is configured (the intended behaviour).
 
 ### Not done yet
 
-- **No eligibility rules on the real corpus.** The rule extractor covers nationality lists in
-  fixtures, but no captured page yields a promotable rule yet, so every real scholarship reports
-  `unknown` requirements.
+- **The rule queue is empty on the real corpus.** The propose-then-review pipeline is wired and
+  tested (validator, admin API, CLI), but the regex extractor finds no promotable candidates on
+  the captured pages and the LLM drafting pass needs an `LLM_API_KEY` that isn't configured yet.
+  Every real scholarship therefore reports `unknown` requirements. Expanding the corpus to 100+
+  well-reviewed opportunities and running the draft/review loop is the headline work item — every
+  approved rule is also a gold label for the evaluation harness.
 - **Chevening eligibility pages are JS-rendered.** Playwright is not installed, so those pages
   are captured as navigation only; the deadline is genuinely absent and stays `unknown` rather
   than being guessed.

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from scholarmind.extraction.extract import extract_all
+from scholarmind.extraction.rule_drafter import VALUE_NORMALISED_NOTE, validate_rule_shape
 from scholarmind.extraction.validate import validate_result
 from scholarmind.ingestion.manifest import Manifest, load_manifest
 from scholarmind.normalization.cycles import build_cycles, choose_current_cycles
@@ -56,6 +57,8 @@ class BuildStats:
     scholarships: int = 0
     cycles: int = 0
     rules: int = 0
+    proposed_rules: int = 0
+    rule_candidates_flagged: int = 0
     funding: int = 0
     documents: int = 0
     skipped_unsupported: int = 0
@@ -71,6 +74,8 @@ class BuildStats:
             "scholarships": self.scholarships,
             "cycles": self.cycles,
             "rules": self.rules,
+            "proposed_rules": self.proposed_rules,
+            "rule_candidates_flagged": self.rule_candidates_flagged,
             "funding": self.funding,
             "documents": self.documents,
             "skipped_unsupported": self.skipped_unsupported,
@@ -183,7 +188,9 @@ def build_corpus(
                 stats.skipped_unsupported += 1
                 stats.warnings.append(f"empty capture: {entry.get('url')}")
                 continue
-            source_document_id = _upsert_source_document(session, text, entry, source, stats)
+            source_document_id = _upsert_source_document(
+                session, text, entry, source, stats, scholarship_id
+            )
             snapshot_id = _insert_snapshot(session, text, entry, source_document_id, page_text, stats)
 
             _index_chunks(session, text, snapshot_id, source_document_id, page_text, chunk_tokens, chunk_overlap, stats)
@@ -248,6 +255,19 @@ def _upsert_scholarship(
         },
     ).first()
     stats.scholarships += 1
+    # Link the canonical source document now that the scholarship id exists, so
+    # chunk -> snapshot -> source document -> scholarship/cycle attribution can
+    # never be orphaned at the primary page.
+    session.execute(
+        text(
+            """
+            UPDATE source_documents
+            SET scholarship_id = CAST(:sid AS uuid)
+            WHERE id = CAST(:source_id AS uuid) AND scholarship_id IS NULL
+            """
+        ),
+        {"sid": row[0], "source_id": source_document_id},
+    )
     return row[0]
 
 
@@ -268,7 +288,7 @@ def _ensure_source_document_row(session: Any, text: Any, entry: dict[str, Any], 
 
 
 def _upsert_source_document(
-    session: Any, text: Any, entry: dict[str, Any], source: Any, stats: BuildStats
+    session: Any, text: Any, entry: dict[str, Any], source: Any, stats: BuildStats, scholarship_id: str
 ) -> str:
     source_type = "other"
     if source is not None:
@@ -276,9 +296,10 @@ def _upsert_source_document(
     row = session.execute(
         text(
             """
-            INSERT INTO source_documents (id, url, source_type, trust_tier, fetch_status, last_checked_at, last_success_at)
-            VALUES (gen_random_uuid(), :url, :source_type, :trust_tier, 'ok', now(), now())
-            ON CONFLICT (url) DO UPDATE SET last_success_at = now(), updated_at = now()
+            INSERT INTO source_documents (id, url, source_type, trust_tier, scholarship_id, fetch_status, last_checked_at, last_success_at)
+            VALUES (gen_random_uuid(), :url, :source_type, :trust_tier, CAST(:scholarship_id AS uuid), 'ok', now(), now())
+            ON CONFLICT (url) DO UPDATE SET last_success_at = now(), updated_at = now(),
+                scholarship_id = COALESCE(source_documents.scholarship_id, EXCLUDED.scholarship_id)
             RETURNING id::text
             """
         ),
@@ -286,6 +307,7 @@ def _upsert_source_document(
             "url": entry["url"],
             "source_type": source_type,
             "trust_tier": entry.get("trust_tier", "official_primary"),
+            "scholarship_id": scholarship_id,
         },
     ).first()
     stats.sources += 1
@@ -467,31 +489,69 @@ def _insert_structured_facts(
     stats.cycles += 1
 
     for rule in validated.eligibility:
-        session.execute(
+        # Eligibility rules are never decided by an extractor. The regex
+        # drafter proposes candidates (drafted_by='regex'); only rules a human
+        # approves - with authored_by='human' - reach the eligibility engine
+        # from the rule_candidates review queue.
+        span_start = int(rule.span_start)
+        span_end = int(rule.span_end)
+        if span_end <= span_start or span_start < 0 or span_end > len(page_text):
+            stats.warnings.append(
+                f"dropped unspanned rule candidate for cycle {cycle_id}: {rule.rule_text[:60]!r}"
+            )
+            continue
+        span_text = page_text[span_start:span_end]
+        normalised = rule.kind in ("nationality", "residency") and isinstance(rule.value, list)
+        notes: list[str] = [VALUE_NORMALISED_NOTE] if normalised else []
+        # Known shape problems are stored for the reviewer instead of hiding
+        # the candidate: the extractor's own kinds (e.g. 'language') may not
+        # match the engine's kind table yet, and human review is the meeting
+        # point. A candidate that still fails validation at approval time is
+        # refused until its kind/subject/value is corrected.
+        notes.extend(
+            validate_rule_shape(
+                kind=rule.kind,
+                subject=rule.subject,
+                operator=rule.operator,
+                value=rule.value,
+                quote=span_text,
+                values_normalised=normalised,
+            )
+        )
+        inserted = session.execute(
             text(
                 """
-                INSERT INTO eligibility_rules
-                    (id, cycle_id, kind, subject, operator, value, comparator, rule_text,
-                     evidence_ids, confidence, ambiguity_flag, authored_by, version)
-                VALUES (gen_random_uuid(), :cycle_id, :kind, :subject, :operator,
-                        CAST(:value AS jsonb), :comparator, :rule_text, CAST(:evidence_ids AS jsonb),
-                        :confidence, :ambiguity, 'rule', 1)
+                INSERT INTO rule_candidates
+                    (cycle_id, snapshot_id, kind, subject, operator, value, comparator, rule_text,
+                     span_start, span_end, span_text, drafted_by, confidence, status, validation_notes)
+                VALUES (:cycle_id, CAST(:snapshot_id AS uuid), :kind, :subject, :operator,
+                        CAST(:value AS jsonb), :comparator, :rule_text,
+                        :span_start, :span_end, :span_text, 'regex', :confidence, 'proposed',
+                        CAST(:status_notes AS jsonb))
+                ON CONFLICT (cycle_id, kind, subject, operator, span_start, span_end) DO NOTHING
+                RETURNING id::text
                 """
             ),
             {
                 "cycle_id": cycle_id,
+                "snapshot_id": snapshot_id,
                 "kind": rule.kind,
                 "subject": rule.subject,
                 "operator": rule.operator,
                 "value": json.dumps(rule.value),
                 "comparator": "mandatory" if rule.mandatory else "optional",
                 "rule_text": rule.rule_text,
-                "evidence_ids": json.dumps(list(rule.evidence_ids) if hasattr(rule, "evidence_ids") else []),
-                "confidence": rule.confidence,
-                "ambiguity": rule.ambiguous,
+                "span_start": span_start,
+                "span_end": span_end,
+                "span_text": span_text,
+                "confidence": float(rule.confidence),
+                "status_notes": json.dumps(notes),
             },
-        )
-        stats.rules += 1
+        ).first()
+        if inserted is not None:
+            stats.proposed_rules += 1
+            if notes:
+                stats.rule_candidates_flagged += 1
 
     for component in validated.funding:
         session.execute(
