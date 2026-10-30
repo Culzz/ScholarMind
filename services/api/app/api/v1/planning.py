@@ -18,6 +18,7 @@ from scholarmind.planning.export import plan_to_ics, plan_to_markdown, shortlist
 from scholarmind.planning.plan import RequiredDocument, generate_plan
 from scholarmind.reporting.comparison import ComparisonColumn, build_comparison, funding_row
 from scholarmind.reporting.ranking import (
+    WEIGHT_LABELS,
     describe_weights,
     normalise_weights,
     rank_opportunities,
@@ -25,6 +26,8 @@ from scholarmind.reporting.ranking import (
 )
 
 router = APIRouter(tags=["planning"])
+
+WEIGHTS_VERSION = "weights-v1"
 
 
 class InvalidWeights(ApiError):
@@ -231,9 +234,112 @@ async def recommendations(
         )
 
     ranked = rank_opportunities(opportunities, weights=normalised)[:limit]
+    if not ranked:
+        return {
+            "items": [],
+            "weights": normalised,
+            "weights_version": WEIGHTS_VERSION,
+            "described_weights": describe_weights(normalised),
+            "interpretation": (
+                "Prioritisation aid only. The score reflects the factors listed above and is not "
+                "a probability of receiving an award."
+            ),
+        }
+
+    scholarship_ids = [item.scholarship_id for item in ranked]
+    cycle_ids = [item.cycle_id for item in ranked if item.cycle_id]
+
+    scholarship_map: dict[str, dict[str, Any]] = {}
+    for row in session.execute(
+        text(
+            """
+            SELECT s.id::text, s.slug, s.name, s.provider_type, s.provider_name,
+                   s.provider_country_iso3, s.description, s.study_levels, s.fields_of_study,
+                   s.destinations, s.trust_tier, s.website_url, s.status, s.canonical_source_id::text
+            FROM scholarships s WHERE s.id::text = ANY(:ids)
+            """
+        ),
+        {"ids": scholarship_ids},
+    ).fetchall():
+        scholarship_map[row[0]] = {
+            "id": row[0],
+            "slug": row[1],
+            "name": row[2],
+            "provider_type": row[3],
+            "provider_name": row[4],
+            "provider_country_iso3": row[5],
+            "description": row[6],
+            "study_levels": row[7],
+            "fields_of_study": row[8],
+            "destinations": row[9],
+            "trust_tier": row[10],
+            "website_url": row[11],
+            "official_url": row[11],
+            "status": row[12],
+            "canonical_source_id": row[13],
+        }
+
+    cycle_map: dict[str, dict[str, Any]] = {}
+    for row in session.execute(
+        text(
+            """
+            SELECT id::text, scholarship_id::text, intake_year, cycle_label, opens_at,
+                   opens_at_precision, deadline_at, deadline_timezone, deadline_raw_text,
+                   deadline_precision, status, status_confidence, is_current, notes
+            FROM scholarship_cycles WHERE id::text = ANY(:ids)
+            """
+        ),
+        {"ids": cycle_ids},
+    ).fetchall():
+        confidence = row[11]
+        claim_state = (
+            "confirmed" if confidence == "confirmed"
+            else "needs_verification" if confidence == "ambiguous"
+            else "not_established"
+        )
+        cycle_map[row[0]] = {
+            "id": row[0],
+            "scholarship_id": row[1],
+            "intake_year": row[2],
+            "cycle_label": row[3],
+            "opens_at": row[4].isoformat() if row[4] else None,
+            "opens_at_precision": row[5],
+            "deadline_at": row[6].isoformat() if row[6] else None,
+            "deadline_timezone": row[7],
+            "deadline_raw_text": row[8],
+            "deadline_precision": row[9],
+            "status": row[10],
+            "status_confidence": row[11],
+            "is_current": row[12],
+            "notes": row[13],
+            "claim_state": claim_state,
+        }
+
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(ranked):
+        record = item.to_dict()
+        record["rank"] = index + 1
+        record["scholarship"] = scholarship_map.get(item.scholarship_id)
+        record["cycle"] = cycle_map.get(item.cycle_id) if item.cycle_id else None
+        record["factors"] = [
+            {
+                "key": key,
+                "label": WEIGHT_LABELS.get(key, key.replace("_", " ")),
+                "value": record["factors"][key],
+                "weight": normalised.get(key, 0.0),
+                "contribution": record["weighted_factors"][key],
+                "detail": None,
+            }
+            for key in record["factors"]
+        ]
+        record["notes"] = [*item.reasons, *item.blockers]
+        items.append(record)
+
     return {
-        "items": [item.to_dict() for item in ranked],
-        "weights": describe_weights(normalised),
+        "items": items,
+        "weights": normalised,
+        "weights_version": WEIGHTS_VERSION,
+        "described_weights": describe_weights(normalised),
         "interpretation": (
             "Prioritisation aid only. The score reflects the factors listed above and is not "
             "a probability of receiving an award."

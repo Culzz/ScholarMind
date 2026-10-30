@@ -17,27 +17,32 @@ const MAX_ITEMS = 5;
 
 function buildMarkdown(comparison: CompareResponse): string {
   const lines: string[] = ['# Scholarship comparison', ''];
-  for (const item of comparison.items) {
-    lines.push(`## ${item.scholarship.name}`);
-    lines.push(`Provider: ${item.scholarship.provider_name}`);
-    lines.push(`Cycle: ${item.cycle?.cycle_label ?? 'Not stated'}`);
-    lines.push(`Deadline: ${formatDate(item.cycle?.deadline_at ?? null)}`);
+  for (const column of comparison.columns) {
+    lines.push(`## ${column.name}`);
+    lines.push(`Deadline: ${column.deadline ?? 'Not stated'} (${column.deadline_state})`);
     lines.push('');
-    lines.push('### Requirement verdicts');
-    for (const verdict of item.rule_verdicts) {
-      lines.push(`- **${verdict.verdict}** — ${verdict.rule_text} (${verdict.reason})`);
+    lines.push('### Facts');
+    for (const field of comparison.fields) {
+      const cell = column.cells[field];
+      if (!cell) {
+        lines.push(`- ${field}: not established`);
+        continue;
+      }
+      lines.push(`- ${field}: ${cell.value ?? 'unknown'} (${cell.state})`);
     }
     lines.push('');
-    lines.push('### Funding components');
-    for (const funding of item.funding) {
-      lines.push(`- ${funding.component}: ${funding.coverage_status}`);
+  }
+  if (comparison.notes.length > 0) {
+    lines.push('## Notes');
+    for (const note of comparison.notes) {
+      lines.push(`- ${note}`);
     }
     lines.push('');
   }
   if (comparison.conflicts.length > 0) {
     lines.push('## Unresolved conflicts');
     for (const conflict of comparison.conflicts) {
-      lines.push(`- ${conflict.field_name}: ${String(conflict.value_a)} vs ${String(conflict.value_b)}`);
+      lines.push(`- ${conflict.field_name ?? 'field'}: ${String(conflict.value_a)} vs ${String(conflict.value_b)}`);
     }
   }
   return lines.join('\n');

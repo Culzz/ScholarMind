@@ -250,6 +250,21 @@ def test_scholarship_detail_serves_the_spa_envelope(client: TestClient) -> None:
         assert rule["comparability"]
 
 
+def test_recommendations_serve_spa_items(client: TestClient) -> None:
+    response = client.get("/api/v1/recommendations")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body["weights"], dict)
+    assert body["weights_version"]
+    for item in body["items"]:
+        assert item["rank"] >= 1
+        assert item["scholarship"] is not None and item["scholarship"]["name"]
+        assert item["cycle"] is None or "deadline_at" in item["cycle"]
+        for factor in item["factors"]:
+            assert {"key", "label", "value", "weight", "contribution"} <= set(factor)
+        assert isinstance(item["notes"], list)
+
+
 def test_history_and_evidence_serve_spa_field_names(client: TestClient) -> None:
     listing = client.get("/api/v1/scholarships", params={"limit": 1}).json()
     item = listing["items"][0]

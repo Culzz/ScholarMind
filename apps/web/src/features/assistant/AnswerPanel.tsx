@@ -138,7 +138,7 @@ export function AnswerPanel({ answer }: AnswerPanelProps): JSX.Element {
       ) : null}
 
       <p className="mt-5 text-xs text-slate-500">
-        Answered {formatDateTime(answer.created_at)}
+        {answer.created_at ? `Answered ${formatDateTime(answer.created_at)}` : 'Audited when a model is configured'}
         {answer.validation_result && !answer.validation_result.referential_ok
           ? ' · at least one citation could not be resolved and was downgraded'
           : ''}

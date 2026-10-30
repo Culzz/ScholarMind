@@ -282,7 +282,7 @@ def _persist_audit(
     from sqlalchemy import text
 
     try:
-        session.execute(
+        inserted = session.execute(
             text(
                 """
                 INSERT INTO answer_audits
@@ -293,6 +293,7 @@ def _persist_audit(
                         CAST(:config AS jsonb), CAST(:claims AS jsonb), CAST(:citations AS jsonb),
                         CAST(:validation AS jsonb), :abstained, :model_id, :prompt_version,
                         :embedding_model, :latency_ms, :cost_usd)
+                RETURNING id::text, created_at
                 """
             ),
             {
@@ -311,6 +312,11 @@ def _persist_audit(
                 "cost_usd": result.cost_usd,
             },
         )
+        audit = inserted.fetchone()
+        if audit is not None:
+            result.id = audit[0]
+            result.answer_audit_id = audit[0]
+            result.created_at = audit[1].isoformat() if audit[1] else None
         session.commit()
     except Exception:  # auditing must never break the answer
         session.rollback()

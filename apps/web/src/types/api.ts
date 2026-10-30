@@ -443,7 +443,7 @@ export interface ValidationResult {
 }
 
 export interface AssistantAnswer {
-  id: string;
+  id: string | null;
   question: string;
   answer: string;
   claims: AssistantClaim[];
@@ -526,19 +526,42 @@ export interface SourceFreshness {
   claim_state: ClaimState;
 }
 
-export interface CompareItem {
-  scholarship: Scholarship;
-  cycle: ScholarshipCycle | null;
-  rule_verdicts: AssessmentResult[];
-  funding: FundingComponent[];
-  unknown_conditions: string[];
-  source_freshness: SourceFreshness[];
+export interface ComparisonCell {
+  /** Row key in the matrix, e.g. 'deadline' or 'funding.tuition'. */
+  field: string;
+  value: unknown;
+  state: 'included' | 'excluded' | 'conditional' | 'unknown' | 'unresolved' | string;
+  source: string | null;
+  checked_at: string | null;
+  note: string | null;
 }
 
+export interface ComparisonColumn {
+  scholarship_id: string;
+  name: string;
+  cycle_id: string | null;
+  deadline: string | null;
+  deadline_state: 'confirmed' | 'unresolved' | string;
+  source_url: string | null;
+  source_checked_at: string | null;
+  cells: Record<string, ComparisonCell>;
+}
+
+/**
+ * The comparison engine's output: a matrix of per-field cells, one column per
+ * scholarship. Every cell states the source it came from and never fills a gap
+ * with a guess.
+ */
 export interface CompareResponse {
-  items: CompareItem[];
-  conflicts: Conflict[];
-  generated_at?: string;
+  fields: string[];
+  columns: ComparisonColumn[];
+  conflicts: Array<{
+    id?: string;
+    field_name?: string;
+    value_a?: unknown;
+    value_b?: unknown;
+  }>;
+  notes: string[];
 }
 
 export interface RecommendationFactor {

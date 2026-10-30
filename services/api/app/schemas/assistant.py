@@ -44,6 +44,8 @@ class ConflictResponse(BaseModel):
 class AssistantAnswerResponse(BaseModel):
     """The assistant's answer to one question."""
 
+    id: str | None = None
+    created_at: str | None = None
     answer: str = ""
     claims: list[ClaimResponse] = Field(default_factory=list)
     abstained: bool = False
