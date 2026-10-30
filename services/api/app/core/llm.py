@@ -21,10 +21,14 @@ from scholarmind.generation.provider import (
 )
 
 # Prices are kept here (not in the core) so the cost report can be reproduced
-# even if a provider changes its published pricing.
+# even if a provider changes its published pricing. Specific families come
+# before the "gpt" catch-all because the lookup is a substring match.
 DEFAULT_PRICES = {
-    "claude": (3.0, 15.0),  # USD per million input/output tokens
-    "gpt": (0.5, 1.5),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt": (0.50, 1.50),
+    "claude": (3.0, 15.0),
     "text-embedding": (0.02, 0.0),
 }
 
@@ -81,6 +85,94 @@ class AnthropicProvider:
             latency_ms=latency_ms,
             raw={"id": getattr(response, "id", None), "stop_reason": getattr(response, "stop_reason", None)},
         )
+
+
+class OpenAIProvider:
+    """Text generation through any OpenAI-compatible ``/chat/completions`` endpoint.
+
+    Uses plain HTTP instead of the vendor SDK so the service still starts
+    without it installed, mirroring the embedding provider.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str = "https://api.openai.com/v1",
+        timeout_seconds: int = 60,
+        price_per_mtok: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self.prices = price_per_mtok or DEFAULT_PRICES
+
+    def generate(self, request: GenerationRequest) -> GenerationResponse:
+        """Call chat completions and return a normalised response."""
+        import time
+
+        import httpx
+
+        payload = {
+            "model": request.model,
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
+            "messages": messages_to_dicts(request.messages),
+        }
+        if request.response_format:
+            payload["response_format"] = request.response_format
+
+        started = time.perf_counter()
+        response = httpx.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        body = response.json()
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        choices = body.get("choices") or []
+        text = "".join(
+            str(choice.get("message", {}).get("content") or "") for choice in choices
+        )
+        usage_payload = body.get("usage") or {}
+        usage = Usage(
+            input_tokens=usage_payload.get("prompt_tokens", 0),
+            output_tokens=usage_payload.get("completion_tokens", 0),
+        )
+        return GenerationResponse(
+            text=text,
+            model=body.get("model", request.model),
+            usage=usage,
+            cost_usd=estimated_cost_usd(request.model, usage, price_per_mtok=self.prices),
+            latency_ms=latency_ms,
+            raw={"id": body.get("id", None), "finish_reason": choices[0].get("finish_reason") if choices else None},
+        )
+
+
+def build_generation_provider(settings: Any) -> Any:
+    """Bind the configured generation provider, or None when unset.
+
+    ``LLM_PROVIDER`` selects the wire protocol: ``openai`` (default for a fresh
+    deployment) speaks ``/chat/completions`` against ``LLM_BASE_URL``, and
+    ``anthropic`` speaks the Messages API. The model, key and base URL come
+    from the same settings, so a key slotting in needs no code change.
+    """
+    if not settings.llm_api_key:
+        return None
+    if settings.llm_provider == "openai":
+        return OpenAIProvider(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            base_url=settings.llm_base_url,
+        )
+    return AnthropicProvider(api_key=settings.llm_api_key, model=settings.llm_model)
+
+
 
 
 class OpenAICompatibleEmbeddingProvider:

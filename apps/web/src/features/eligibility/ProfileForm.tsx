@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useForm, type Resolver } from 'react-hook-form';
-import { zodResolver } from '@zod/resolvers/zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
 import { Button } from '@/components/ui/Button';
@@ -138,7 +138,7 @@ export interface ProfileFormProps {
   saving?: boolean;
   submitLabel?: string;
   /** Called when the user asks to evaluate with the current answers. */
-  onEvaluate?: () => void | Promise<void>;
+  onEvaluate?: (input: ProfileInput) => void | Promise<void>;
   evaluating?: boolean;
 }
 

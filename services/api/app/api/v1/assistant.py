@@ -53,11 +53,9 @@ def _build_prompt(question: str, chunks: list[RetrievedChunk]) -> list[dict[str,
 
 def _provider() -> Any:
     settings = get_settings()
-    if not settings.llm_api_key:
-        return None
-    from app.core.llm import AnthropicProvider
+    from app.core.llm import build_generation_provider
 
-    return AnthropicProvider(api_key=settings.llm_api_key, model=settings.llm_model)
+    return build_generation_provider(settings)
 
 
 def _embedding_provider() -> Any:

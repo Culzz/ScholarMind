@@ -42,13 +42,17 @@ ELIGIBILITY_KEYWORDS = (
 )
 
 
-def _provider(settings: Settings) -> AnthropicProvider:
-    if not settings.llm_api_key:
+def _provider(settings: Settings) -> Any:
+    from app.core.llm import build_generation_provider
+
+    provider = build_generation_provider(settings)
+    if provider is None:
         raise RuntimeError(
             "LLM_API_KEY is not configured. Drafting needs generation provider access; "
-            "set LLM_API_KEY (and LLM_MODEL if you want a different model) in the environment."
+            "set LLM_API_KEY (plus LLM_PROVIDER=anthropic for Anthropic; the default "
+            "provider is OpenAI-compatible) in the environment."
         )
-    return AnthropicProvider(api_key=settings.llm_api_key, model=settings.llm_model)
+    return provider
 
 
 def _draft_targets(

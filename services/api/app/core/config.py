@@ -51,7 +51,9 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     llm_api_key: str = ""
-    llm_model: str = "claude-sonnet-5"
+    llm_provider: Literal["anthropic", "openai"] = "openai"
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o-mini"
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.0
     embedding_api_key: str = ""

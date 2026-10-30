@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ClaimChip } from '@/components/ClaimChip';
+import { claimStateMeta } from '@/lib/claims';
 
 describe('ClaimChip', () => {
   it('always renders the text label, not only a colour', () => {
@@ -19,9 +20,9 @@ describe('ClaimChip', () => {
     ] as const;
 
     for (const state of states) {
-      const { unmount } = render(<ClaimChip state={state} />);
-      const chip = screen.getByRole('span');
-      expect(chip.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+      const meta = claimStateMeta(state);
+      const { unmount, getByText } = render(<ClaimChip state={state} />);
+      expect(getByText(meta.label)).toBeInTheDocument();
       unmount();
     }
   });
