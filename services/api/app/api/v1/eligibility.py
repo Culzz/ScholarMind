@@ -98,6 +98,27 @@ def _load_rules(session: Session, cycle_ids: list[str]) -> dict[str, list[Any]]:
     return rules
 
 
+_CALLS_BUDGET_NOTE = "Cycle set defaults to every current cycle, oldest deadline first (bounded)."
+
+
+def _default_cycle_ids(session: Session, limit: int = 50) -> list[str]:
+    """All current cycles, deadlines first - the honest default shortlist."""
+    rows = session.execute(
+        text(
+            """
+            SELECT c.id::text
+            FROM scholarship_cycles c
+            JOIN scholarships s ON s.id = c.scholarship_id
+            WHERE c.is_current = true AND s.status = 'active'
+            ORDER BY (c.deadline_at IS NULL), c.deadline_at ASC
+            LIMIT :limit
+            """
+        ),
+        {"limit": limit},
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
 def _resolve_cycle_ids(session: Session, request: EvaluateRequest) -> list[str]:
     if request.cycle_ids:
         return request.cycle_ids
@@ -113,7 +134,7 @@ def _resolve_cycle_ids(session: Session, request: EvaluateRequest) -> list[str]:
             {"ids": request.scholarship_ids},
         ).fetchall()
         return [row[0] for row in rows]
-    return []
+    return _default_cycle_ids(session)
 
 
 def _profile_from_session(session: Session, profile: dict[str, Any]) -> dict[str, Any]:
@@ -154,7 +175,17 @@ def _profile_from_session(session: Session, profile: dict[str, Any]) -> dict[str
 
 @router.post("/evaluate", dependencies=[Depends(rate_limit("eligibility_write", setting="rate_limit_write_per_min"))])
 async def evaluate(payload: EvaluateRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
-    """Evaluate a profile against the rules of the selected cycles."""
+    """Evaluate a profile against the rules of the selected cycles.
+
+    With no cycle or scholarship ids the request is evaluated against every
+    current cycle (bounded), not against nothing. ``verdict_counts`` mirrors
+    ``counts`` for clients that name the aggregate that way; both are the same
+    numbers, and neither is a match percentage.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
     from scholarmind.eligibility.engine import EligibilityEngine, summarize
 
     cycle_ids = _resolve_cycle_ids(session, payload)
@@ -163,6 +194,10 @@ async def evaluate(payload: EvaluateRequest, session: Session = Depends(get_db))
 
     rules_by_cycle = _load_rules(session, cycle_ids)
     profile = _profile_from_session(session, payload.profile)
+    profile_hash = hashlib.sha256(
+        json.dumps(profile, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:16]
+    created_at = datetime.now(timezone.utc).isoformat()
     engine = EligibilityEngine()
 
     assessments: list[dict[str, Any]] = []
@@ -173,12 +208,18 @@ async def evaluate(payload: EvaluateRequest, session: Session = Depends(get_db))
         if not payload.explain:
             record.pop("results", None)
         record["summary"] = summarize(assessment)
+        record["verdict_counts"] = record.get("counts", {})
+        record["id"] = f"{cycle_id}:{profile_hash}"
+        record["profile_hash"] = profile_hash
+        record["ruleset_version"] = 1
+        record["created_at"] = created_at
         assessments.append(record)
 
     return {
         "profile_fields_used": sorted(profile.keys()),
         "assessments": assessments,
         "engine_version": engine.version,
+        "created_at": created_at,
     }
 
 
@@ -201,6 +242,19 @@ async def explain(payload: ExplainRequest, session: Session = Depends(get_db)) -
 
     row = rows[0]
     results = row[4] or []
+    trace = [
+        {
+            "rule_id": result.get("rule_id"),
+            "kind": result.get("kind"),
+            "subject": result.get("subject"),
+            "verdict": result.get("verdict"),
+            "reason": result.get("reason"),
+            "rule_text": result.get("rule_text"),
+            "evidence_ids": result.get("evidence_ids") or [],
+            "missing_field": result.get("missing_field"),
+        }
+        for result in results
+    ]
     return {
         "assessment_id": row[0],
         "cycle_id": row[1],
@@ -209,18 +263,7 @@ async def explain(payload: ExplainRequest, session: Session = Depends(get_db)) -
         "engine_version": row[5],
         "ruleset_version": row[6],
         "created_at": row[7].isoformat() if row[7] else None,
-        "explanation": [
-            {
-                "kind": result.get("kind"),
-                "subject": result.get("subject"),
-                "verdict": result.get("verdict"),
-                "reason": result.get("reason"),
-                "rule_text": result.get("rule_text"),
-                "evidence_ids": result.get("evidence_ids") or [],
-                "missing_field": result.get("missing_field"),
-            }
-            for result in results
-        ],
+        "trace": trace,
     }
 
 
