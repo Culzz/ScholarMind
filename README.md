@@ -116,14 +116,28 @@ with citation validation and abstention built in. A missing profile fact yields 
 ```bash
 cp .env.example .env                     # add provider keys (optional for local work)
 docker compose -f infra/docker-compose.yml up -d db redis
+docker compose -f infra/docker-compose.yml up migrate     # alembic to head, then api waits on it
+docker compose -f infra/docker-compose.yml up -d api web   # api on :8000, SPA on :5173
+# optional: full stack with the worker, and the seeded demo corpus
+docker compose -f infra/docker-compose.yml --profile full up -d
+docker compose -f infra/docker-compose.yml --profile seed up seed
+
+# local, no Docker
 pip install -r services/api/requirements.txt
-alembic upgrade head
-uvicorn services.api.app.main:app --reload
-celery -A services.worker.celery_app worker -l info
+DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:55432/scholarmind alembic upgrade head
+DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:55432/scholarmind \
+  PYTHONPATH=".;services/api" python -m uvicorn app.main:app --reload
 cd apps/web && npm ci && npm run dev
 ```
 
 Health: `GET /api/v1/health`
+
+The OpenAI generation path is wired and waiting: set `LLM_PROVIDER=openai`,
+`LLM_API_KEY=sk-...`, `LLM_BASE_URL=https://api.openai.com/v1`,
+`LLM_MODEL=gpt-4o-mini` in `.env`. Without a key the assistant abstains
+explicitly and rule drafting refuses to run — nothing is generated offline.
+With a key, LLM-proposed rules land in the human review queue and run in the
+eligibility engine only after a person approves them. See `docs/DEPLOYMENT.md`.
 
 ### Building the corpus (no Docker required)
 

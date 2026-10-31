@@ -122,3 +122,57 @@ python -m app.cli review-rules --list
 python -m app.cli review-rules --approve <candidate_id> --note "checks out on the page"
 python scripts/smoke_retrieval.py
 ```
+
+## API contract wiring (deployed shape, verified in this checkout)
+
+The SPA's contract is now served by the API; every surface was exercised
+against the rebuilt local corpus via `scripts/_contract_check.py` and the new
+test module `tests/api/test_contract_surfaces.py`:
+
+- `GET /scholarships` — cursor pagination (`next_cursor`, opaque base64 offset),
+  items carry `current_cycle` in the full SRS cycle shape (with `claim_state`
+  derived from `status_confidence`/`freshness_state`, never invented),
+  `official_url`, `description`, `rule_count`, `provider_country_iso3`,
+  `deadline_claim_state`.
+- `GET /scholarships/{id}` — the SPA envelope
+  `{scholarship, cycles, funding_components, required_documents, rules,
+  sources, latest_assessment}`; `latest_assessment` is `null` until a stored
+  assessment feature ships. History/evidence use the SPA field names
+  (`field_name`, `claim_text`, `snapshot_id`).
+- `GET/PUT /profile` over `student_profiles`; `completeness` counts usable
+  fields, is never presented as eligibility, and unknown fields are rejected
+  (`extra='forbid'`).
+- `GET/POST/PATCH /applications`, `GET /tasks`, `PATCH /tasks/{id}` — creating
+  an application generates its checklist from the deterministic planner
+  (`is_auto_generated=true`, `status='todo'`); `completed_at` tracks the task's
+  new state; status vocabularies match the SPA.
+- `POST /eligibility/evaluate` — no selection evaluates **all current cycles**
+  (bounded at 50, deadlines first) instead of 404; each assessment carries
+  `verdict_counts` next to `counts` (same numbers, no percentage, plus
+  `profile_hash` and a stable `id`).
+- `POST /eligibility/explain` — returns `trace` with `rule_id` per result.
+- `GET /recommendations` — items now serve the SPA contract (`rank`, full
+  `scholarship`, `cycle` with `claim_state`, `factors` as labelled
+  `{key,label,value,weight,contribution,detail}` rows, `notes`); the score
+  stays labelled a prioritisation aid.
+- `POST /assistant/ask` — the persisted audit id and `created_at` are returned
+  (early abstentions legitimately have neither; the UI says so).
+
+Test state: `pytest tests -q` → **295 passed, 0 failures**; web `typecheck` +
+13 vitest tests + production build green.
+
+## Deployment
+
+`infra/docker-compose.yml` boots db+redis+migrate+api+web (+ optional worker),
+`infra/Dockerfile.web` + `apps/web/nginx.conf` serve the SPA and proxy `/api`
+on one origin (first-party refresh cookie). Seeded demo: `docker compose
+--profile seed up seed` imports the verified capture set. See
+`docs/DEPLOYMENT.md`. The OpenAI path is keyed and waiting: set
+`LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_BASE_URL=https://api.openai.com/v1`,
+`LLM_MODEL=gpt-4o-mini` in `.env`; without a key the assistant abstains
+explicitly and drafting refuses with exit 2 — nothing fabricated.
+
+Verified so far: `docker compose ... config` validates (compose CLI 29.6.2).
+The image builds and `up` were **not exercised locally** — the Docker Desktop
+daemon was not running at commit time — so the first `docker compose up` is
+still a live check, not a repeat of a recorded pass.
