@@ -226,6 +226,24 @@ def capture_manifest(
         sources = sources[:limit]
 
     for source in sources:
+        if source.fetch_policy == "manual":
+            # Unreachable from the fetcher's network by policy (DNS, geo or
+            # timeout). No fetch attempt at all: the record is entered by hand
+            # with provenance, or it does not exist.
+            logger.warning(
+                "skipping %s: fetch_policy=manual - capture by hand with provenance only",
+                source.url,
+            )
+            results.append(
+                CaptureResult(
+                    url=source.url,
+                    name=source.name,
+                    trust_tier=source.trust_tier,
+                    ok=False,
+                    error="fetch_policy=manual (no automatic capture)",
+                )
+            )
+            continue
         if _url_key(source.url) in seen:
             logger.info("skipping %s: already captured", source.url)
             continue

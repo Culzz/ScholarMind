@@ -42,6 +42,7 @@ class SourceEntry:
     level: str = "masters"
     notes: str = ""
     requires_render: bool = False
+    fetch_policy: str = "direct"
     parent_url: str | None = None
     group: str | None = None
 
@@ -56,6 +57,7 @@ class SourceEntry:
             "level": self.level,
             "notes": self.notes,
             "requires_render": self.requires_render,
+            "fetch_policy": self.fetch_policy,
             "parent_url": self.parent_url,
             "group": self.group,
         }
@@ -95,6 +97,8 @@ def load_manifest(path: str | Path) -> Manifest:
     raw = _parse_yaml(Path(path).read_text(encoding="utf-8"))
     defaults = raw.get("defaults") or {}
 
+    valid_fetch_policies = {"direct", "browser", "manual"}
+
     sources: list[SourceEntry] = []
     seen: set[str] = set()
     for item in raw.get("sources") or []:
@@ -119,6 +123,13 @@ def load_manifest(path: str | Path) -> Manifest:
         if cadence < 1:
             raise ValueError(f"cadence_hours must be >= 1 for {url}")
 
+        fetch_policy = item.get("fetch_policy", defaults.get("fetch_policy", "direct"))
+        if fetch_policy not in valid_fetch_policies:
+            raise ValueError(f"unknown fetch_policy '{fetch_policy}' for {url}")
+        # A bot-blocked page can only be captured with the headless adapter,
+        # so the flag falls back to the policy rather than being contradictory.
+        requires_render = bool(item.get("requires_render", fetch_policy == "browser"))
+
         sources.append(
             SourceEntry(
                 url=url,
@@ -129,7 +140,8 @@ def load_manifest(path: str | Path) -> Manifest:
                 scope=tuple(item.get("scope") or ()),
                 level=item.get("level", defaults.get("level", "masters")),
                 notes=item.get("notes", ""),
-                requires_render=bool(item.get("requires_render", False)),
+                requires_render=requires_render,
+                fetch_policy=fetch_policy,
                 group=item.get("group"),
             )
         )
@@ -147,13 +159,18 @@ def due_sources(manifest: Manifest, last_checked: dict[str, Any]) -> list[Source
     """Return the sources whose refresh cadence has elapsed.
 
     ``last_checked`` maps a source URL to its last successful check timestamp.
-    Sources never checked are always due.
+    Sources never checked are always due, except ``manual`` policy entrants:
+    those are unreachable from the fetcher's network (DNS, timeout or geo) and
+    are entered by hand with provenance - scheduling them would only hammer a
+    host that has already refused us.
     """
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
     due: list[SourceEntry] = []
     for source in manifest.sources:
+        if source.fetch_policy == "manual":
+            continue
         checked = last_checked.get(source.url)
         if checked is None:
             due.append(source)

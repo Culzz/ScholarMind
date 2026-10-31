@@ -66,13 +66,13 @@ Also fixed while in this area (not in the fifteen):
 ## Corpus after a clean rebuild
 
 Values verified against the database after `scripts/rebuild_corpus.py --yes` over the capture in
-`data/raw/` (2026-10-26), not from build counters:
+`data/raw/` (2026-10-29), not from build counters:
 
 | Metric | Value |
 |---|---|
-| Manifest sources | 99 (72 source documents linked to a scholarship) |
+| Manifest sources | 99 (72 source documents with a captured page) |
 | Snapshots imported | 72 |
-| Scholarships | 27 |
+| Scholarships | **18** |
 | Cycles | 18 (4 with a deadline) |
 | Evidence chunks | 320 |
 | Confirmed claims | 11 |
@@ -80,11 +80,22 @@ Values verified against the database after `scripts/rebuild_corpus.py --yes` ove
 | Required documents | 8 |
 | Approved eligibility rules | **0** |
 | Rule candidates in the queue | 0 |
+| Source rows claiming `ok` without a snapshot | **0** |
 
-`pytest tests` passes 284 tests in this checkout (74.7 s warm).
+`pytest tests` passes **300** tests in this checkout.
 
-The claim count is lower than the previous build (23) because earlier counters incremented per
-attempt rather than per inserted row; 11 is the number of rows a reader can actually cite.
+The scholarship count dropped from 27 to 18 because nine records stood on
+**failed captures** (Oxford 403, Cambridge 403, Edinburgh 403, Fulbright 403,
+NDDC 403, SETD/UNILAG/AKU unresolvable, Commonwealth timeout). The builder used
+to create a scholarship and a `fetch_status='ok'` source row for a page it
+could never read, then skip the content - a fabricated record. A failed capture
+is now kept out of the corpus entirely: it is listed explicitly in the build
+warnings (`failed capture kept out of the corpus (no record is created)`), and
+the corresponding manifest entries carry `fetch_policy: browser` (headless
+adapter) or `fetch_policy: manual` (entered by hand with provenance only).
+`due_sources` never schedules a `manual` entry; the capture step refuses to
+fetch one. See `tests/unit/test_fetch_policy.py` and
+`tests/api/test_corpus_builder.py`.
 
 ## Known gaps
 
@@ -134,8 +145,7 @@ test module `tests/api/test_contract_surfaces.py`:
   derived from `status_confidence`/`freshness_state`, never invented),
   `official_url`, `description`, `rule_count`, `provider_country_iso3`,
   `deadline_claim_state`.
-- `GET /scholarships/{id}` — the SPA envelope
-  `{scholarship, cycles, funding_components, required_documents, rules,
+- `GET /scholarships/{id}` — the SPA envelope  `{scholarship, cycles, funding_components, required_documents, rules,
   sources, latest_assessment}`; `latest_assessment` is `null` until a stored
   assessment feature ships. History/evidence use the SPA field names
   (`field_name`, `claim_text`, `snapshot_id`).

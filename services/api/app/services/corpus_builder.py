@@ -150,8 +150,21 @@ def build_corpus(
     stats = BuildStats()
     stats.vocabulary = seeded  # type: ignore[attr-defined]
 
+    # A scholarship record must stand on at least one page that was actually
+    # read. A failed capture (403 / DNS / timeout) stays in the capture report
+    # as an operator record, but it never becomes a scholarship or a source
+    # document row claiming 'ok'.
+    readable = [entry for entry in entries if entry.get("ok")]
+    failed = [entry for entry in entries if not entry.get("ok")]
+    for entry in failed:
+        stats.skipped_unsupported += 1
+        stats.warnings.append(
+            f"failed capture kept out of the corpus (no record is created): "
+            f"{entry.get('url')} - {entry.get('error') or entry.get('status_code')}"
+        )
+
     groups: dict[str, list[dict[str, Any]]] = {}
-    for entry in entries:
+    for entry in readable:
         groups.setdefault(_group_key(entry, by_url), []).append(entry)
 
     for group_key, group in groups.items():
@@ -170,8 +183,6 @@ def build_corpus(
         )
 
         for entry in group:
-            if not entry.get("ok"):
-                continue
             folder = Path(entry["path"])
             page_path = folder / "page.txt"
             if not page_path.exists():

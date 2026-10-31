@@ -61,15 +61,19 @@ def test_manifest_rejects_unknown_trust_tier(tmp_path: Path) -> None:
 def test_due_sources_respects_cadence() -> None:
     manifest = load_manifest(MANIFEST)
     now = datetime.now(timezone.utc)
+    schedulable = [source for source in manifest if source.fetch_policy != "manual"]
+    manual_urls = [source.url for source in manifest if source.fetch_policy == "manual"]
+    assert manual_urls, "the project manifest pins the manual-entry policy"
 
     never_checked = due_sources(manifest, {})
-    assert len(never_checked) == len(manifest)
+    assert len(never_checked) == len(schedulable)
+    assert {source.url for source in never_checked}.isdisjoint(manual_urls)
 
     just_checked = {source.url: now for source in manifest}
     assert due_sources(manifest, just_checked) == []
 
     long_ago = {source.url: now - timedelta(days=30) for source in manifest}
-    assert len(due_sources(manifest, long_ago)) == len(manifest)
+    assert len(due_sources(manifest, long_ago)) == len(schedulable)
 
 
 def test_snapshot_is_immutable_and_hashable() -> None:
